@@ -1,12 +1,18 @@
 import logging
+import re
+import time
 
-from openai import AsyncClient, APIError
+import httpx
+from openai import AsyncClient
 
+import cache_manager
 import config
-from prompt_template import format_prompt, LANGUAGE_NAMES
+from prompt_template import format_prompt
 from validator import validate_translation
 
 logger = logging.getLogger(__name__)
+
+TRANSLATION_TIMEOUT = 30
 
 
 class TranslationError(Exception):
@@ -15,81 +21,254 @@ class TranslationError(Exception):
         self.status_code = status_code
 
 
+def estimate_tokens(text: str) -> int:
+    return max(1, len(text) // 4)
+
+
+def estimate_max_output_tokens(text: str, multiplier: float = 5.0, cap: int = 16384) -> int:
+    input_tokens = estimate_tokens(text)
+    return max(256, min(cap, int(input_tokens * multiplier)))
+
+
+async def _translate_google(text: str, source: str, target: str) -> str:
+    url = "https://translate.googleapis.com/translate_a/single"
+    params = {
+        "client": "gtx",
+        "sl": source if source != "auto" else "auto",
+        "tl": target,
+        "dt": "t",
+        "q": text,
+    }
+    async with httpx.AsyncClient(timeout=TRANSLATION_TIMEOUT) as client:
+        resp = await client.get(url, params=params)
+        resp.raise_for_status()
+        data = resp.json()
+        return "".join(part[0] for part in data[0])
+
+
+async def _translate_libretranslate(text: str, source: str, target: str) -> str:
+    payload = {
+        "q": text,
+        "source": source if source != "auto" else "auto",
+        "target": target,
+        "format": "text",
+    }
+    headers = {}
+    if config.LIBRETRANSLATE_API_KEY:
+        headers["Authorization"] = f"Bearer {config.LIBRETRANSLATE_API_KEY}"
+
+    async with httpx.AsyncClient(timeout=TRANSLATION_TIMEOUT) as client:
+        resp = await client.post(config.LIBRETRANSLATE_URL, json=payload, headers=headers)
+        resp.raise_for_status()
+        data = resp.json()
+        return data["translatedText"]
+
+
+_NON_LLM_TRANSLATORS = {
+    "google": _translate_google,
+    "libretranslate": _translate_libretranslate,
+}
+
+
 class LLMTranslator:
     def __init__(self, provider_name: str | None = None):
-        if provider_name is None:
-            provider_name = config.DEFAULT_PROVIDER
-        if provider_name not in config.PROVIDERS:
-            available = list(config.PROVIDERS.keys())
-            raise ValueError(
-                f"Unknown provider: {provider_name}. "
-                f"Available: {available}"
-            )
+        self.chain = getattr(config, "TRANSLATION_CHAIN", self._default_chain())
+        self._llm_clients: dict[str, AsyncClient] = {}
+        self._validate_chain()
 
-        self.provider_cfg = config.PROVIDERS[provider_name]
-        self.client = AsyncClient(
-            api_key=self.provider_cfg["api_key"],
-            base_url=self.provider_cfg["base_url"],
-        )
-        self.model = self.provider_cfg["model"]
+    def _default_chain(self) -> list[dict]:
+        return [
+            {"type": "llm", "provider": config.DEFAULT_PROVIDER},
+            {"type": "google"},
+            {"type": "libretranslate"},
+        ]
+
+    def _validate_chain(self):
+        for i, step in enumerate(self.chain):
+            step_type = step.get("type", "llm")
+            if step_type == "llm":
+                provider = step.get("provider")
+                if not provider:
+                    raise ValueError(f"Step {i}: LLM step missing 'provider'")
+                if provider not in config.PROVIDERS:
+                    raise ValueError(
+                        f"Step {i}: unknown provider '{provider}'. "
+                        f"Available: {list(config.PROVIDERS.keys())}"
+                    )
+
+    def _get_client(self, provider_name: str) -> AsyncClient:
+        if provider_name not in self._llm_clients:
+            cfg = config.PROVIDERS[provider_name]
+            self._llm_clients[provider_name] = AsyncClient(
+                api_key=cfg["api_key"],
+                base_url=cfg["base_url"],
+            )
+        return self._llm_clients[provider_name]
+
+    def _clean_output(self, text: str) -> str:
+        return re.sub(
+            r'\n{2,}(?:Wait|Let|I\s+(?:need|think|should|must|will|am|was|have|had|can|could|would)|Original:|Translation:|Note:|Here\'?s|Checking|Re-?check|Let\'?s|The\s+translation|After|Now|This|That|The\s+original|Step|Good|Perfect|Alright|Okay).*',
+            '',
+            text,
+            flags=re.DOTALL | re.IGNORECASE,
+        ).strip()
+
+    def _step_label(self, step: dict) -> str:
+        t = step.get("type", "llm")
+        if t == "llm":
+            p = step["provider"]
+            m = config.PROVIDERS[p]["model"]
+            return f"LLM {p}/{m}"
+        return t.capitalize()
 
     async def translate(self, text: str, source: str, target: str) -> dict:
+        original_source = source
+        original_target = target
+        llm_source = "en"
+        llm_target = "ru"
+
+        cached = cache_manager.get_cache(original_source, original_target, text)
+        if cached is not None:
+            logger.info("Using cached translation")
+            return {"translatedText": cached}
+
+        if not self.chain:
+            raise TranslationError("TRANSLATION_CHAIN is empty", 500)
+
+        total = len(self.chain)
+        errors: list[str] = []
+
+        for idx, step in enumerate(self.chain):
+            step_num = idx + 1
+            step_type = step.get("type", "llm")
+            label = self._step_label(step)
+            start = time.monotonic()
+
+            try:
+                if step_type == "llm":
+                    result = await self._translate_via_llm(
+                        text, llm_source, llm_target, step, step["provider"]
+                    )
+                elif step_type in _NON_LLM_TRANSLATORS:
+                    result = await _NON_LLM_TRANSLATORS[step_type](
+                        text, original_source, original_target
+                    )
+                else:
+                    logger.warning("[%d/%d] %s — unknown step type, skipped", step_num, total, label)
+                    errors.append(f"step {step_num}: unknown type '{step_type}'")
+                    continue
+
+                elapsed = time.monotonic() - start
+
+                if result and result.strip():
+                    clean = result.strip()
+                    logger.info("[%d/%d] %s — SUCCESS (%.1fs)", step_num, total, label, elapsed)
+                    if config.LOG_TRANSLATION_CONTENT:
+                        logger.info("Content: %s", clean)
+                    cache_manager.set_cache(original_source, original_target, text, clean)
+                    return {"translatedText": clean}
+
+                logger.warning("[%d/%d] %s — empty result (%.1fs)", step_num, total, label, elapsed)
+                errors.append(f"step {step_num}: empty result")
+
+            except TranslationError as e:
+                elapsed = time.monotonic() - start
+                logger.warning("[%d/%d] %s — FAILED: %s (%.1fs)", step_num, total, label, e.message, elapsed)
+                errors.append(f"step {step_num}: {e.message}")
+            except Exception as e:
+                elapsed = time.monotonic() - start
+                logger.warning("[%d/%d] %s — FAILED: %s (%.1fs)", step_num, total, label, e, elapsed)
+                errors.append(f"step {step_num}: {e}")
+
+        raise TranslationError(
+            f"All {total} translation steps failed. Errors: {'; '.join(errors)}", 502,
+        )
+
+    async def _translate_via_llm(
+        self, text: str, source: str, target: str, step: dict, provider_name: str,
+    ) -> str:
+        cfg = config.PROVIDERS[provider_name]
+        client = self._get_client(provider_name)
+        model = cfg["model"]
+
         parts = format_prompt(source, target, text)
         messages: list[dict[str, str]] = [
             {"role": "system", "content": parts["system"]},
             {"role": "user", "content": parts["user"]},
         ]
 
-        prefill_template = self.provider_cfg.get("prefill")
-        prefill = None
-        if prefill_template:
-            source_name = LANGUAGE_NAMES.get(source, source) if source != "auto" else "auto-detected language"
-            target_name = LANGUAGE_NAMES.get(target, target)
-            prefill = (prefill_template
-                .replace("{source}", source_name)
-                .replace("{target}", target_name))
-            messages.append({"role": "assistant", "content": prefill})
+        if "prefill" in step:
+            prefill_text = step["prefill"]
+        else:
+            prefill_text = cfg.get("prefill")
+
+        if prefill_text:
+            messages.append({"role": "assistant", "content": prefill_text})
+
+        temperature = step.get("temperature", 0.0)
 
         extra_body = {}
-        reasoning_effort = self.provider_cfg.get("reasoning_effort")
+        reasoning_effort = step.get("reasoning_effort") or cfg.get("reasoning_effort")
         if reasoning_effort:
             extra_body["reasoning_effort"] = reasoning_effort
 
-        logger.info("Sending request to %s (max_tokens=8192)", self.model)
-        try:
-            response = await self.client.chat.completions.create(
-                model=self.model,
+        step_multiplier = step.get("multiplier", 5.0)
+        step_cap = step.get("cap", 16384)
+        if "max_tokens" in step:
+            max_tokens = step["max_tokens"]
+        else:
+            max_tokens = estimate_max_output_tokens(text, step_multiplier, step_cap)
+
+        logger.debug("Input text (%d chars): %r", len(text), text[:1000])
+        logger.debug("Messages sent:\n%s",
+            "\n".join(f"  [{m['role']}] {m['content'][:200]}" for m in messages))
+        logger.debug(
+            "LLM request: provider=%s model=%s max_tokens=%s temp=%.1f prefill=%s input_chars=%d",
+            provider_name, model, str(max_tokens), temperature,
+            "yes" if prefill_text else "no", len(text),
+        )
+
+        if max_tokens is not None:
+            response = await client.chat.completions.create(
+                model=model,
                 messages=messages,  # type: ignore
-                temperature=0.0,
-                max_tokens=8192,
+                temperature=temperature,
+                max_tokens=max_tokens,
                 extra_body=extra_body or None,
             )
-        except APIError as e:
-            raise TranslationError(f"LLM API error: {e.message}", 502)
-        except Exception as e:
-            raise TranslationError(f"Translation failed: {str(e)}", 502)
+        else:
+            response = await client.chat.completions.create(
+                model=model,
+                messages=messages,  # type: ignore
+                temperature=temperature,
+                extra_body=extra_body or None,
+            )
 
         content = response.choices[0].message.content
-        if content is None:
-            raise TranslationError("LLM returned empty response", 502)
+        finish_reason = response.choices[0].finish_reason
+        usage = response.usage
+        logger.debug("Raw response: finish_reason=%s content=%r", finish_reason, content)
+        if usage:
+            logger.debug("Token usage: %s", usage)
 
-        if prefill and content.startswith(prefill):
-            content = content[len(prefill):]
+        if content is None:
+            logger.warning("LLM returned empty (finish_reason=%s)", finish_reason)
+            raise TranslationError(
+                f"LLM returned empty response (finish_reason={finish_reason})",
+            )
+
+        if prefill_text and content.startswith(prefill_text):
+            content = content[len(prefill_text):]
 
         content = content.strip()
-
-        logger.info("Raw model output: %r", content[:500])
-        logger.info("Cyrillic ratio: %.2f", sum(1 for c in content if '\u0400' <= c <= '\u04FF' or '\u0500' <= c <= '\u052F') / max(len(content), 1))
+        content = self._clean_output(content)
 
         if not validate_translation(content, target):
             logger.warning(
-                "Validation failed for %s->%s: output doesn't look like target language",
-                source, target,
+                "Validation raw content (after strip): %r", content[:2000],
             )
             raise TranslationError(
-                f"Translation output validation failed — result is not in target language ({target})",
-                502,
+                f"Output validation failed — not in target language ({target})",
             )
 
-        logger.info("Response: %s", content)
-        return {"translatedText": content}
+        return content
