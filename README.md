@@ -87,9 +87,12 @@ Browser-based translation interface (Google Translate style) at the root URL.
 
 - `http://localhost:5555/` — two-panel UI with source/target language selectors, auto-translate with 2.5s debounce, swap button, copy to clipboard
 - Supports all 35 languages from the validation list (auto-detect for source)
+- 🌞 Light theme and 🌙 dark theme
 - Served from `static/index.html`
 
-![Web UI screenshot](static/img/webui.jpg)
+| Light theme | Dark theme |
+|---|---|
+| ![Web UI light](static/img/webui.jpg) | ![Web UI dark](static/img/webui_black.jpg) |
 
 ## 🌐 API Routes
 
@@ -215,9 +218,12 @@ curl -X POST http://localhost:5555/translate \
 
 - `http://localhost:5555/` — двухпанельный интерфейс с выбором исходного/целевого языка, авто-перевод с задержкой 2.5с, кнопка смены языков, копирование в буфер
 - Поддерживает все 35 языков из списка валидации (авто-определение для исходного)
+- 🌞 Светлая тема и 🌙 тёмная тема
 - Файлы в `static/index.html`
 
-![Скриншот Web UI](static/img/webui.jpg)
+| Светлая тема | Тёмная тема |
+|---|---|
+| ![Web UI светлая](static/img/webui.jpg) | ![Web UI тёмная](static/img/webui_black.jpg) |
 
 ## 🌐 API Routes
 
