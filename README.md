@@ -13,11 +13,17 @@
 
 ## 🚀 Quick start
 
+### Windows
+```batch
+install.bat
+start.bat
+```
+
+### Linux / macOS
 ```bash
-pip install -r requirements.txt
-cp .env.example .env
-# edit .env with your API keys
-python main.py
+chmod +x install.sh start.sh
+./install.sh
+./start.sh
 ```
 
 Server starts at **http://0.0.0.0:5555**.
@@ -123,11 +129,17 @@ pydantic   httpx      python-dotenv
 
 ## 🚀 Быстрый старт
 
+### Windows
+```batch
+install.bat
+start.bat
+```
+
+### Linux / macOS
 ```bash
-pip install -r requirements.txt
-cp .env.example .env
-# отредактируйте .env, указав свои API-ключи
-python main.py
+chmod +x install.sh start.sh
+./install.sh
+./start.sh
 ```
 
 Сервер запускается на **http://0.0.0.0:5555**.

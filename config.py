@@ -34,6 +34,15 @@ LIBRETRANSLATE_API_KEY = os.getenv("LIBRETRANSLATE_API_KEY", "")
 LOG_TRANSLATION_CONTENT = os.getenv("LOG_TRANSLATION_CONTENT", "false").lower() == "true"
 
 PRESETS: dict[str, dict] = {
+    "default": {
+        "name": "Default (Local LLM)",
+        "description": "Local Qwen model via chat then completions fallback",
+        "default_provider": "localllm",
+        "translation_chain": [
+            {"type": "llm", "provider": "localllm", "multiplier": 8, "cap": 16384},
+            {"type": "llm", "provider": "localllm", "mode": "completions", "temperature": 0.3, "multiplier": 10, "cap": 32768},
+        ],
+    },
     "deepseek": {
         "name": "DeepSeek",
         "description": "DeepSeek API for translation with Google/LibreTranslate fallback",

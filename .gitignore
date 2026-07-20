@@ -3,6 +3,12 @@ __pycache__/
 *.pyc
 *.pyo
 
+# Virtual environment
+venv/
+.venv/
+env/
+.virtualenvs/
+
 # Cache (auto-generated)
 cache/*.json
 
@@ -11,3 +17,18 @@ cache/*.json
 
 # Bug tracker — personal notes, not code
 ISSUES.md
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Distribution
+*.egg-info/
+dist/
+build/
