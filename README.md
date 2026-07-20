@@ -89,6 +89,8 @@ Browser-based translation interface (Google Translate style) at the root URL.
 - Supports all 35 languages from the validation list (auto-detect for source)
 - Served from `static/index.html`
 
+![Web UI screenshot](static/img/webui.jpg)
+
 ## 🌐 API Routes
 
 | Method | Path | Description |
@@ -214,6 +216,8 @@ curl -X POST http://localhost:5555/translate \
 - `http://localhost:5555/` — двухпанельный интерфейс с выбором исходного/целевого языка, авто-перевод с задержкой 2.5с, кнопка смены языков, копирование в буфер
 - Поддерживает все 35 языков из списка валидации (авто-определение для исходного)
 - Файлы в `static/index.html`
+
+![Скриншот Web UI](static/img/webui.jpg)
 
 ## 🌐 API Routes
 
