@@ -16,13 +16,27 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 import cache_manager
+import config
 from translator import LLMTranslator, TranslationError
 
 _provider = os.environ.get("TRANSLATOR_PROVIDER")
+_preset_name: str | None = os.environ.get("TRANSLATOR_PRESET")
+
 for i, arg in enumerate(sys.argv):
     if arg == "--provider" and i + 1 < len(sys.argv):
         _provider = sys.argv[i + 1]
-        break
+    if arg == "--preset" and i + 1 < len(sys.argv):
+        _preset_name = sys.argv[i + 1]
+
+if _preset_name is not None:
+    loaded = config.load_preset(_preset_name)
+    if loaded is None:
+        print(f"Error: preset '{_preset_name}' not found")
+        sys.exit(1)
+    config.apply_preset(loaded)
+    logger.info("Loaded preset: %s", loaded.get("name", _preset_name))
+else:
+    logger.info("No preset specified, using defaults from config.py")
 
 try:
     translator = LLMTranslator(_provider)
@@ -62,9 +76,8 @@ async def translate(request: Request):
     target = _str("target")
 
     if not q.strip():
-        logger.warning("Bad request — q=%r source=%r target=%r raw keys=%s",
-                       q, source, target, list(raw.keys()) if hasattr(raw, 'keys') else type(raw).__name__)
-        raise HTTPException(400, detail="q is required and must not be empty")
+        logger.debug("Empty q='%s', returning empty translation", q.strip())
+        return {"translatedText": ""}
     if not target.strip():
         logger.warning("Bad request — q=%r source=%r target=%r raw keys=%s",
                        q, source, target, list(raw.keys()) if hasattr(raw, 'keys') else type(raw).__name__)
@@ -104,4 +117,11 @@ async def clear_all_cache():
 
 if __name__ == "__main__":
     import uvicorn
+
+    if _preset_name is None and "--preset" not in sys.argv:
+        _preset_name = config.choose_preset_interactive()
+
+    if _preset_name is not None:
+        os.environ["TRANSLATOR_PRESET"] = _preset_name
+
     uvicorn.run("main:app", host="0.0.0.0", port=5555, reload=True)

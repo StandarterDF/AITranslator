@@ -26,8 +26,18 @@ validator.py     — script-based language validation (Cyrillic ratio ≥ 0.5)
 - **Fallback chain**: `config.py:12-15` — ordered list of steps. Each step can be an LLM (with provider, prefill, temperature, multiplier overrides) or a non-LLM translator.
 - **Dynamic max_tokens**: `input_chars / 4 * multiplier`, clamped to `[256, cap]`. Set per-step in `TRANSLATION_CHAIN` (`multiplier`, `cap`). Set `"max_tokens": null` to remove the limit entirely.
 - **prefill logic**: If `"prefill"` key is present in step — use that value (can be `None` to disable). If absent — fall back to provider's `prefill` from `PROVIDERS`.
-- **Output cleaning** (`_clean_output`, line 107): regex strips trailing English reasoning after `\n\n` + trigger words (Wait, Let, I need, Original:, etc.). The regex may need extension for new patterns.
-- **No tests, no README, no CI**.
+- **Step 1 — chat mode (DO NOT TOUCH)**: `"mode": "chat"` (default). Uses `client.chat.completions.create()` with system+user+assistant prefill. The provider's default prefill (`<|channel|>thought...`) works. This step is stable and must not be modified.
+- **Step 2 — completions mode**: `"mode": "completions"`. Uses `client.completions.create(prompt=...)` — raw prompt with `<|channel|>` tokens, no prefill, no messages. The model outputs `<|channel|>thought\n...<|channel|>\n...translation...`. Parsing strips the thought block via `split("<|channel|>")[-1]`.
+- **Step 2 NEVER uses prefill** — it's a raw completions request. The model reasons naturally in a thought block, then outputs the answer.
+- **Output cleaning** (`_clean_output`, line 108): regex strips trailing English reasoning after `\n\n` + trigger words (Wait, Let, I need, Original:, etc.). Additionally, if `\n\nПеревод:` is found in the output, everything before it is discarded (English paraphrase from the model).
+## Cache
+
+- **DO NOT clear entire cache**. Only delete specific corrupt entries.
+- Cache entries are JSON files in `cache/` directory, named by hash key.
+- To delete a single entry: `python -c "import cache_manager; cache_manager.delete_cache('HASH_KEY')"` (full hash from log or file name).
+- Log shows hash on cache hits: `Cached translation HASH_KEY`.
+- The FastAPI app exposes `DELETE /cache/{hash_key}` and `DELETE /cache` routes — use the former, never the latter.
+- `GET /cache` lists all entries with previews to find the right hash.
 
 ## Dependencies
 

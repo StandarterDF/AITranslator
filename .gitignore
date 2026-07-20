@@ -5,3 +5,6 @@ __pycache__/
 
 # Cache (auto-generated)
 cache/*.json
+
+# Environment — contains secrets
+.env

@@ -14,6 +14,31 @@ logger = logging.getLogger(__name__)
 
 TRANSLATION_TIMEOUT = 30
 
+URL_PATTERN = re.compile(r'https?://[^\s<>"\'\]\[\)\(]+')
+
+
+def restore_urls(original: str, translation: str) -> str:
+    orig_urls = URL_PATTERN.findall(original)
+    if not orig_urls:
+        return translation
+
+    trans_urls = URL_PATTERN.findall(translation)
+    replacements = {}
+    for orig_url, trans_url in zip(orig_urls, trans_urls):
+        if orig_url != trans_url:
+            replacements[trans_url] = orig_url
+
+    if not replacements:
+        return translation
+
+    result = translation
+    for wrong, correct in replacements.items():
+        result = result.replace(wrong, correct)
+
+    logger.debug("Restored %d URLs in translation: %s", len(replacements),
+                 {k[:60]: v[:60] for k, v in replacements.items()})
+    return result
+
 
 class TranslationError(Exception):
     def __init__(self, message: str, status_code: int = 502):
@@ -106,12 +131,14 @@ class LLMTranslator:
         return self._llm_clients[provider_name]
 
     def _clean_output(self, text: str) -> str:
-        return re.sub(
+        text = re.sub(
             r'\n{2,}(?:Wait|Let|I\s+(?:need|think|should|must|will|am|was|have|had|can|could|would)|Original:|Translation:|Note:|Here\'?s|Checking|Re-?check|Let\'?s|The\s+translation|After|Now|This|That|The\s+original|Step|Good|Perfect|Alright|Okay).*',
             '',
             text,
             flags=re.DOTALL | re.IGNORECASE,
-        ).strip()
+        )
+        text = re.sub(r'\n---\s*\n.*', '', text, flags=re.DOTALL)
+        return text.strip()
 
     def _step_label(self, step: dict) -> str:
         t = step.get("type", "llm")
@@ -162,6 +189,7 @@ class LLMTranslator:
 
                 if result and result.strip():
                     clean = result.strip()
+                    clean = restore_urls(text, clean)
                     logger.info("[%d/%d] %s — SUCCESS (%.1fs)", step_num, total, label, elapsed)
                     if config.LOG_TRANSLATION_CONTENT:
                         logger.info("Content: %s", clean)
@@ -190,6 +218,11 @@ class LLMTranslator:
         cfg = config.PROVIDERS[provider_name]
         client = self._get_client(provider_name)
         model = cfg["model"]
+
+        if step.get("mode") == "completions":
+            return await self._translate_via_completions(
+                text, source, target, step, provider_name, client, model, cfg,
+            )
 
         parts = format_prompt(source, target, text)
         messages: list[dict[str, str]] = [
@@ -261,6 +294,87 @@ class LLMTranslator:
             content = content[len(prefill_text):]
 
         content = content.strip()
+        # If the model outputs English paraphrase before Перевод:, keep only the Russian part
+        if "\n\nПеревод:" in content:
+            content = content.split("\n\nПеревод:", 1)[-1].strip()
+        content = self._clean_output(content)
+
+        if not validate_translation(content, target):
+            logger.warning(
+                "Validation raw content (after strip): %r", content[:2000],
+            )
+            raise TranslationError(
+                f"Output validation failed — not in target language ({target})",
+            )
+
+        return content
+
+    async def _translate_via_completions(
+        self, text: str, source: str, target: str, step: dict, provider_name: str,
+        client, model: str, cfg: dict,
+    ) -> str:
+        prompt = (
+            f"<|channel|>user\n"
+            f"Переведи следующий текст с английского на русский:\n\n{text}\n\n"
+            f"Перевод:<|channel|>\n"
+            f"<|channel|>assistant\n"
+        )
+
+        temperature = step.get("temperature", 0.0)
+        step_multiplier = step.get("multiplier", 5.0)
+        step_cap = step.get("cap", 16384)
+        if "max_tokens" in step:
+            max_tokens = step["max_tokens"]
+        else:
+            max_tokens = estimate_max_output_tokens(text, step_multiplier, step_cap)
+
+        logger.debug("Completions prompt (%d chars): %r", len(prompt), prompt[:300])
+        logger.debug(
+            "LLM request: provider=%s model=%s max_tokens=%s temp=%.1f input_chars=%d",
+            provider_name, model, str(max_tokens), temperature, len(text),
+        )
+
+        if max_tokens is not None:
+            response = await client.completions.create(
+                model=model,
+                prompt=prompt,
+                temperature=temperature,
+                max_tokens=max_tokens,
+            )
+        else:
+            response = await client.completions.create(
+                model=model,
+                prompt=prompt,
+                temperature=temperature,
+            )
+
+        content = response.choices[0].text
+        finish_reason = response.choices[0].finish_reason
+        usage = response.usage
+        logger.debug("Raw completions: finish_reason=%s content=%r", finish_reason, content)
+        if usage:
+            logger.debug("Token usage: %s", usage)
+
+        if not content or not content.strip():
+            raise TranslationError(
+                f"LLM returned empty response (finish_reason={finish_reason})",
+            )
+
+        # Model outputs: <|channel|>thought\n...<|channel|>\n...translation...
+        # Strip thought block — take everything after the last <|channel|> tag
+        if "<|channel|>" in content:
+            content = content.split("<|channel|>")[-1]
+        elif "<|channel>" in content:
+            content = content.split("<|channel>")[-1]
+        # Strip trailing channel tags if any
+        if "<|channel|>" in content:
+            content = content.split("<|channel|>")[0]
+        elif "<|channel>" in content:
+            content = content.split("<|channel>")[0]
+
+        content = content.strip()
+        if "\n\nПеревод:" in content:
+            content = content.split("\n\nПеревод:", 1)[-1].strip()
         content = self._clean_output(content)
 
         if not validate_translation(content, target):
