@@ -37,7 +37,7 @@ curl -X POST http://localhost:5555/translate \
 | `main.py` | FastAPI app, routes, uvicorn launcher |
 | `translator.py` | `LLMTranslator` — fallback chain execution |
 | `config.py` | Providers, chain definition, presets |
-| `prompt_template.py` | System/user prompt templates (en→ru) |
+| `prompt_template.py` | Dynamic system/user prompt templates (any language pair) |
 | `validator.py` | Script-based language validation (≥50% target script) |
 | `cache_manager.py` | SHA256 JSON cache in `cache/` directory |
 
@@ -79,9 +79,10 @@ Defined in `config.py` as `TRANSLATION_CHAIN`. Each step is tried in order:
 | Method | Path | Description |
 |---|---|---|
 | 🟢 `POST` | `/translate` | Translate text (`q`, `source`, `target`) |
+| 🟢 `GET` | `/health` | Health check |
 | 🔵 `GET` | `/cache` | List cache entries |
 | 🔴 `DELETE` | `/cache/{hash_key}` | Delete single cache entry |
-| 🔴 `DELETE` | `/cache` | Clear all cache |
+| 🟡 `POST` | `/cache/{hash_key}/invalidate` | Invalidate cache entry |
 
 ## ✅ Validation
 
@@ -94,13 +95,22 @@ Output is validated per language script. At least **50%** of alphabetic characte
 - 🇹🇭 Thai — th
 - 🇬🇷 Greek — el
 - 🇮🇳 Devanagari — hi
+- 🔤 Latin — en, es, fr, de, it, pt, nl, pl, tr, vi, cs, sv, da, fi, id, ms, no, ro, hu
 
 Falls through (always valid) for unsupported languages.
 
 ## 📝 Notes
 
-- LLM steps hardcode source→target as **en→ru**. Non-LLM fallbacks use the original request params.
+- LLM steps respect the request's `source`/`target` parameters. Prompts are generated dynamically using language names from `LANGUAGE_NAMES`.
 - `max_tokens` is dynamic: `input_chars / 4 × multiplier`, clamped to `[256, cap]`. Set `"max_tokens": null` to disable.
+- The `DELETE /cache` (clear all) endpoint has been removed for safety. Use `DELETE /cache/{hash_key}` to delete individual entries.
+
+## 🧪 Tests
+
+```bash
+pip install pytest
+python -m pytest test_translator.py -v
+```
 
 ## 📦 Dependencies
 
@@ -150,7 +160,7 @@ curl -X POST http://localhost:5555/translate \
 | `main.py` | FastAPI приложение, роуты, запуск uvicorn |
 | `translator.py` | `LLMTranslator` — исполнение цепочки fallback |
 | `config.py` | Провайдеры, цепочка перевода, пресеты |
-| `prompt_template.py` | Системный/пользовательский промпт (en→ru) |
+| `prompt_template.py` | Динамический системный/пользовательский промпт (любая языковая пара) |
 | `validator.py` | Валидация языка по скрипту (≥50% целевого алфавита) |
 | `cache_manager.py` | SHA256 JSON-кэш в `cache/` |
 
@@ -192,9 +202,10 @@ curl -X POST http://localhost:5555/translate \
 | Метод | Путь | Описание |
 |---|---|---|
 | 🟢 `POST` | `/translate` | Перевод текста (`q`, `source`, `target`) |
+| 🟢 `GET` | `/health` | Проверка работоспособности |
 | 🔵 `GET` | `/cache` | Список записей кэша |
 | 🔴 `DELETE` | `/cache/{hash_key}` | Удалить одну запись кэша |
-| 🔴 `DELETE` | `/cache` | Очистить весь кэш |
+| 🟡 `POST` | `/cache/{hash_key}/invalidate` | Инвалидировать запись кэша |
 
 ## ✅ Валидация
 
@@ -207,13 +218,22 @@ curl -X POST http://localhost:5555/translate \
 - 🇹🇭 Тайский — th
 - 🇬🇷 Греческий — el
 - 🇮🇳 Деванагари — hi
+- 🔤 Латиница — en, es, fr, de, it, pt, nl, pl, tr, vi, cs, sv, da, fi, id, ms, no, ro, hu
 
 Для неподдерживаемых языков валидация пропускается.
 
 ## 📝 Заметки
 
-- LLM-шаги жёстко задают source→target как **en→ru**. Не-LLM fallback используют оригинальные параметры запроса.
+- LLM-шаги используют переданные параметры `source`/`target`. Промпты генерируются динамически на основе названий языков из `LANGUAGE_NAMES`.
 - `max_tokens` вычисляется динамически: `input_chars / 4 × multiplier`, в диапазоне `[256, cap]`. Установите `"max_tokens": null` для отключения лимита.
+- Эндпоинт `DELETE /cache` (полная очистка) удалён из соображений безопасности. Используйте `DELETE /cache/{hash_key}` для удаления отдельных записей.
+
+## 🧪 Тесты
+
+```bash
+pip install pytest
+python -m pytest test_translator.py -v
+```
 
 ## 📦 Зависимости
 
