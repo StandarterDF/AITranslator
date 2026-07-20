@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AILibreTranslater</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: #f8f9fa;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.header {
+  padding: 16px 24px;
+  font-size: 20px;
+  font-weight: 600;
+  color: #1a73e8;
+  background: #fff;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.container {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  padding: 24px;
+  max-width: 1200px;
+  width: 100%;
+  margin: 0 auto;
+  gap: 0;
+}
+
+.lang-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.lang-select {
+  flex: 1;
+  min-width: 150px;
+}
+
+.lang-select select {
+  width: 100%;
+  padding: 10px 12px;
+  font-size: 15px;
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #fff;
+  color: #202124;
+  cursor: pointer;
+  outline: none;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' stroke='%235f6368' stroke-width='1.5' fill='none'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+  padding-right: 32px;
+}
+
+.lang-select select:focus {
+  border-color: #1a73e8;
+  box-shadow: 0 0 0 2px rgba(26,115,232,0.15);
+}
+
+.swap-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  border: 1px solid #dadce0;
+  background: #fff;
+  cursor: pointer;
+  font-size: 18px;
+  color: #5f6368;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.swap-btn:hover {
+  background: #e8f0fe;
+  border-color: #1a73e8;
+  color: #1a73e8;
+}
+
+.panels {
+  display: flex;
+  gap: 0;
+  flex: 1;
+  min-height: 300px;
+}
+
+.panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #dadce0;
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.panel:first-child {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+
+.panel:last-child {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.panel textarea, .panel .output-area {
+  flex: 1;
+  width: 100%;
+  border: none;
+  outline: none;
+  resize: none;
+  padding: 20px;
+  font-size: 18px;
+  line-height: 1.5;
+  color: #202124;
+  font-family: inherit;
+  min-height: 250px;
+}
+
+.panel textarea::placeholder { color: #9aa0a6; }
+
+.output-area {
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  overflow-y: auto;
+  background: #fafafa;
+  color: #5f6368;
+  font-style: italic;
+}
+
+.output-area.has-content {
+  color: #202124;
+  font-style: normal;
+}
+
+.panel-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 16px;
+  border-top: 1px solid #f1f3f4;
+  font-size: 13px;
+  color: #5f6368;
+  min-height: 40px;
+}
+
+.btn {
+  padding: 6px 16px;
+  font-size: 13px;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  background: #fff;
+  color: #5f6368;
+  cursor: pointer;
+  transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.btn:hover { background: #f1f3f4; }
+
+.btn.copy-btn { color: #1a73e8; border-color: #d2e3fc; }
+.btn.copy-btn:hover { background: #e8f0fe; }
+
+.btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.char-warn { color: #e8710a; font-weight: 500; }
+
+.error-msg {
+  color: #d93025;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid #dadce0;
+  border-top-color: #1a73e8;
+  border-radius: 50%;
+  animation: spin 0.6s linear infinite;
+}
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+@media (max-width: 640px) {
+  .container { padding: 12px; }
+  .panels { flex-direction: column; min-height: auto; }
+  .panel:first-child { border-radius: 12px; border-right: 1px solid #dadce0; }
+  .panel:last-child { border-radius: 12px; }
+  .panel textarea, .panel .output-area { min-height: 150px; }
+}
+</style>
+</head>
+<body>
+
+<div class="header">AILibreTranslater</div>
+
+<div class="container">
+  <div class="lang-bar">
+    <div class="lang-select">
+      <select id="source-lang">
+        <option value="auto">Auto-detect</option>
+        <option value="en">English</option>
+        <option value="ru">Russian</option>
+        <option value="zh">Chinese</option>
+        <option value="ja">Japanese</option>
+        <option value="ko">Korean</option>
+        <option value="fr">French</option>
+        <option value="de">German</option>
+        <option value="es">Spanish</option>
+        <option value="it">Italian</option>
+        <option value="pt">Portuguese</option>
+        <option value="ar">Arabic</option>
+        <option value="hi">Hindi</option>
+        <option value="tr">Turkish</option>
+        <option value="nl">Dutch</option>
+        <option value="pl">Polish</option>
+        <option value="sv">Swedish</option>
+        <option value="cs">Czech</option>
+        <option value="uk">Ukrainian</option>
+        <option value="be">Belarusian</option>
+        <option value="bg">Bulgarian</option>
+        <option value="sr">Serbian</option>
+        <option value="el">Greek</option>
+        <option value="he">Hebrew</option>
+        <option value="th">Thai</option>
+        <option value="vi">Vietnamese</option>
+        <option value="id">Indonesian</option>
+        <option value="ms">Malay</option>
+        <option value="fi">Finnish</option>
+        <option value="da">Danish</option>
+        <option value="no">Norwegian</option>
+        <option value="ro">Romanian</option>
+        <option value="hu">Hungarian</option>
+        <option value="sk">Slovak</option>
+      </select>
+    </div>
+
+    <button class="swap-btn" id="swap-btn" title="Swap languages">⇄</button>
+
+    <div class="lang-select">
+      <select id="target-lang">
+        <option value="ru" selected>Russian</option>
+        <option value="en">English</option>
+        <option value="zh">Chinese</option>
+        <option value="ja">Japanese</option>
+        <option value="ko">Korean</option>
+        <option value="fr">French</option>
+        <option value="de">German</option>
+        <option value="es">Spanish</option>
+        <option value="it">Italian</option>
+        <option value="pt">Portuguese</option>
+        <option value="ar">Arabic</option>
+        <option value="hi">Hindi</option>
+        <option value="tr">Turkish</option>
+        <option value="nl">Dutch</option>
+        <option value="pl">Polish</option>
+        <option value="sv">Swedish</option>
+        <option value="cs">Czech</option>
+        <option value="uk">Ukrainian</option>
+        <option value="be">Belarusian</option>
+        <option value="bg">Bulgarian</option>
+        <option value="sr">Serbian</option>
+        <option value="el">Greek</option>
+        <option value="he">Hebrew</option>
+        <option value="th">Thai</option>
+        <option value="vi">Vietnamese</option>
+        <option value="id">Indonesian</option>
+        <option value="ms">Malay</option>
+        <option value="fi">Finnish</option>
+        <option value="da">Danish</option>
+        <option value="no">Norwegian</option>
+        <option value="ro">Romanian</option>
+        <option value="hu">Hungarian</option>
+        <option value="sk">Slovak</option>
+      </select>
+    </div>
+  </div>
+
+  <div class="panels">
+    <div class="panel">
+      <textarea id="input-text" placeholder="Enter text to translate..."></textarea>
+      <div class="panel-footer">
+        <span id="char-count">0</span>
+        <span id="input-error" class="error-msg"></span>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="output-area" id="output-text">Translation will appear here</div>
+      <div class="panel-footer">
+        <span id="status"></span>
+        <button class="btn copy-btn" id="copy-btn" disabled onclick="copyOutput()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 01-2-2V4a2 2 0 012-2h9a2 2 0 012 2v1"/></svg>
+          Copy
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const inputEl = document.getElementById('input-text');
+const outputEl = document.getElementById('output-text');
+const sourceEl = document.getElementById('source-lang');
+const targetEl = document.getElementById('target-lang');
+const swapBtn = document.getElementById('swap-btn');
+const charCount = document.getElementById('char-count');
+const copyBtn = document.getElementById('copy-btn');
+const statusEl = document.getElementById('status');
+const inputError = document.getElementById('input-error');
+
+let debounceTimer = null;
+
+inputEl.addEventListener('input', () => {
+  charCount.textContent = inputEl.value.length;
+
+  clearTimeout(debounceTimer);
+  if (inputEl.value.trim()) {
+    debounceTimer = setTimeout(doTranslate, 2500);
+  } else {
+    clearOutput();
+  }
+});
+
+swapBtn.addEventListener('click', () => {
+  const src = sourceEl.value;
+  const tgt = targetEl.value;
+  if (src === 'auto') return;
+  sourceEl.value = tgt;
+  targetEl.value = src;
+  if (inputEl.value.trim() && outputEl.textContent.trim()) {
+    inputEl.value = outputEl.textContent;
+    doTranslate();
+  } else if (inputEl.value.trim()) {
+    doTranslate();
+  }
+});
+
+targetEl.addEventListener('change', () => {
+  if (inputEl.value.trim()) doTranslate();
+});
+
+sourceEl.addEventListener('change', () => {
+  if (inputEl.value.trim()) doTranslate();
+});
+
+function clearOutput() {
+  outputEl.textContent = 'Translation will appear here';
+  outputEl.classList.remove('has-content');
+  copyBtn.disabled = true;
+  statusEl.innerHTML = '';
+  inputError.textContent = '';
+}
+
+async function doTranslate() {
+  const q = inputEl.value.trim();
+  if (!q) { clearOutput(); return; }
+
+  outputEl.textContent = '';
+  outputEl.classList.remove('has-content');
+  copyBtn.disabled = true;
+  statusEl.innerHTML = '<span class="spinner"></span>';
+  inputError.textContent = '';
+
+  try {
+    const resp = await fetch('/translate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        q: q,
+        source: sourceEl.value,
+        target: targetEl.value
+      })
+    });
+
+    if (!resp.ok) {
+      const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+      throw new Error(err.detail || 'Translation failed');
+    }
+
+    const data = await resp.json();
+    const result = data.translatedText || '';
+
+    if (result) {
+      outputEl.textContent = result;
+      outputEl.classList.add('has-content');
+      copyBtn.disabled = false;
+      statusEl.innerHTML = '';
+    } else {
+      outputEl.textContent = 'Translation will appear here';
+      outputEl.classList.remove('has-content');
+      statusEl.innerHTML = '';
+    }
+  } catch (e) {
+    outputEl.textContent = 'Translation will appear here';
+    outputEl.classList.remove('has-content');
+    statusEl.innerHTML = '';
+    inputError.textContent = e.message || 'Translation failed';
+    console.error(e);
+  }
+}
+
+function copyOutput() {
+  const text = outputEl.textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    const orig = copyBtn.innerHTML;
+    copyBtn.innerHTML = '&#10003; Copied';
+    setTimeout(() => { copyBtn.innerHTML = orig; }, 1500);
+  }).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+    const orig = copyBtn.innerHTML;
+    copyBtn.innerHTML = '&#10003; Copied';
+    setTimeout(() => { copyBtn.innerHTML = orig; }, 1500);
+  });
+}
+</script>
+
+</body>
+</html>

@@ -41,6 +41,7 @@ curl -X POST http://localhost:5555/translate \
 | File | Role |
 |---|---|
 | `main.py` | FastAPI app, routes, uvicorn launcher |
+| `static/index.html` | Web UI — Google Translate-style translation interface |
 | `translator.py` | `LLMTranslator` — fallback chain execution |
 | `config.py` | Providers, chain definition, presets |
 | `prompt_template.py` | Dynamic system/user prompt templates (any language pair) |
@@ -80,10 +81,19 @@ Defined in `config.py` as `TRANSLATION_CHAIN`. Each step is tried in order:
 
 **Non-LLM fallbacks:** `google` (free API), `libretranslate`.
 
+## 🖥 Web UI
+
+Browser-based translation interface (Google Translate style) at the root URL.
+
+- `http://localhost:5555/` — two-panel UI with source/target language selectors, auto-translate with 2.5s debounce, swap button, copy to clipboard
+- Supports all 35 languages from the validation list (auto-detect for source)
+- Served from `static/index.html`
+
 ## 🌐 API Routes
 
 | Method | Path | Description |
 |---|---|---|
+| 🟢 `GET` | `/` | Web UI (translation interface) |
 | 🟢 `POST` | `/translate` | Translate text (`q`, `source`, `target`) |
 | 🟢 `GET` | `/health` | Health check |
 | 🔵 `GET` | `/cache` | List cache entries |
@@ -157,6 +167,7 @@ curl -X POST http://localhost:5555/translate \
 | Файл | Роль |
 |---|---|
 | `main.py` | FastAPI приложение, роуты, запуск uvicorn |
+| `static/index.html` | Web UI — интерфейс перевода в стиле Google Translate |
 | `translator.py` | `LLMTranslator` — исполнение цепочки fallback |
 | `config.py` | Провайдеры, цепочка перевода, пресеты |
 | `prompt_template.py` | Динамический системный/пользовательский промпт (любая языковая пара) |
@@ -196,10 +207,19 @@ curl -X POST http://localhost:5555/translate \
 
 **Не-LLM fallback:** `google` (бесплатный API), `libretranslate`.
 
+## 🖥 Web UI
+
+Интерфейс перевода в браузере (в стиле Google Translate) по корневому URL.
+
+- `http://localhost:5555/` — двухпанельный интерфейс с выбором исходного/целевого языка, авто-перевод с задержкой 2.5с, кнопка смены языков, копирование в буфер
+- Поддерживает все 35 языков из списка валидации (авто-определение для исходного)
+- Файлы в `static/index.html`
+
 ## 🌐 API Routes
 
 | Метод | Путь | Описание |
 |---|---|---|
+| 🟢 `GET` | `/` | Web UI (интерфейс перевода) |
 | 🟢 `POST` | `/translate` | Перевод текста (`q`, `source`, `target`) |
 | 🟢 `GET` | `/health` | Проверка работоспособности |
 | 🔵 `GET` | `/cache` | Список записей кэша |

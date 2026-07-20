@@ -3,6 +3,8 @@ import sys
 from contextlib import asynccontextmanager
 from typing import Any
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 import logging
 
@@ -146,6 +148,15 @@ async def invalidate_cache_entry(hash_key: str):
     if not cache_manager.invalidate_cache(hash_key):
         raise HTTPException(404, detail="Cache entry not found")
     return {"detail": "Cache entry invalidated"}
+
+
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+if os.path.isdir(static_dir):
+    app.mount("/static", StaticFiles(directory=static_dir), name="static")
+
+    @app.get("/")
+    async def root():
+        return FileResponse(os.path.join(static_dir, "index.html"))
 
 
 if __name__ == "__main__":
