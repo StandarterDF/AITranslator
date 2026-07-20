@@ -92,7 +92,7 @@ Browser-based translation interface (Google Translate style) at the root URL.
 
 | Light theme | Dark theme |
 |---|---|
-| ![Web UI light](static/img/webui.jpg) | ![Web UI dark](static/img/webui_black.jpg) |
+| <img alt="Web UI light" src="static/img/webui.jpg" width="450"> | <img alt="Web UI dark" src="static/img/webui_black.jpg" width="450"> |
 
 ## 🌐 API Routes
 
