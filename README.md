@@ -1,8 +1,17 @@
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python" alt="Python">
+  <img src="https://img.shields.io/badge/FastAPI-0.115%2B-009688?style=for-the-badge&logo=fastapi" alt="FastAPI">
+  <img src="https://img.shields.io/badge/LLM-OpenAI--compatible-FF6F00?style=for-the-badge&logo=openai" alt="LLM">
+  <img src="https://img.shields.io/badge/status-active-brightgreen?style=for-the-badge" alt="Status">
+</p>
+
 # AILibreTranslater
 
-Self-hosted translation microservice powered by LLMs with a configurable fallback chain.
+> Self-hosted translation microservice powered by LLMs with a configurable fallback chain.
 
-## Quick start
+---
+
+## 🚀 Quick start
 
 ```bash
 pip install -r requirements.txt
@@ -11,9 +20,9 @@ cp .env.example .env
 python main.py
 ```
 
-Server starts at `http://0.0.0.0:5555`.
+Server starts at **http://0.0.0.0:5555**.
 
-## Usage
+## 📦 Usage
 
 ```bash
 curl -X POST http://localhost:5555/translate \
@@ -21,7 +30,7 @@ curl -X POST http://localhost:5555/translate \
   -d '{"q": "Hello world", "source": "auto", "target": "ru"}'
 ```
 
-## Architecture
+## 🧱 Architecture
 
 | File | Role |
 |---|---|
@@ -32,7 +41,7 @@ curl -X POST http://localhost:5555/translate \
 | `validator.py` | Script-based language validation (≥50% target script) |
 | `cache_manager.py` | SHA256 JSON cache in `cache/` directory |
 
-## Configuration
+## ⚙️ Configuration
 
 Set via `.env` or environment variables:
 
@@ -51,46 +60,71 @@ Provider selection: `python main.py --provider localllm` or `TRANSLATOR_PROVIDER
 
 Preset selection: `python main.py --preset deepseek`. Interactive choice on startup if none given.
 
-## Fallback chain
+## 🔗 Fallback chain
 
-Defined in `config.py` as `TRANSLATION_CHAIN`. Each step is tried in order. On success — result is cached and returned. On failure — next step runs.
+Defined in `config.py` as `TRANSLATION_CHAIN`. Each step is tried in order:
 
-Two LLM modes:
+- ✅ **Success** → result cached and returned
+- ❌ **Failure** → next step runs
 
-- **chat** (default): `chat.completions.create()` with system/user/assistant messages
-- **completions**: `completions.create()` with raw `<|channel|>`-token prompt (no prefill)
+**Two LLM modes:**
 
-Non-LLM fallbacks: `google` (free API), `libretranslate`.
+- 💬 **chat** (default): `chat.completions.create()` with system/user/assistant messages
+- ⚡ **completions**: `completions.create()` with raw `<|channel|>`-token prompt (no prefill)
 
-## API Routes
+**Non-LLM fallbacks:** `google` (free API), `libretranslate`.
+
+## 🌐 API Routes
 
 | Method | Path | Description |
 |---|---|---|
-| `POST` | `/translate` | Translate text (`q`, `source`, `target`) |
-| `GET` | `/cache` | List cache entries |
-| `DELETE` | `/cache/{hash_key}` | Delete single cache entry |
-| `DELETE` | `/cache` | Clear all cache |
+| 🟢 `POST` | `/translate` | Translate text (`q`, `source`, `target`) |
+| 🔵 `GET` | `/cache` | List cache entries |
+| 🔴 `DELETE` | `/cache/{hash_key}` | Delete single cache entry |
+| 🔴 `DELETE` | `/cache` | Clear all cache |
 
-## Validation
+## ✅ Validation
 
-Output is validated per language script (Cyrillic for ru/uk/be/bg/sr, CJK for zh/ja, etc.). At least 50% of alphabetic characters must match the target script. Falls through (always valid) for unsupported languages.
+Output is validated per language script. At least **50%** of alphabetic characters must match the target script:
 
-## Notes
+- 🇷🇺 Cyrillic — ru, uk, be, bg, sr
+- 🇨🇳 CJK — zh, ja, ko
+- 🇸🇦 Arabic — ar
+- 🇮🇱 Hebrew — he
+- 🇹🇭 Thai — th
+- 🇬🇷 Greek — el
+- 🇮🇳 Devanagari — hi
+
+Falls through (always valid) for unsupported languages.
+
+## 📝 Notes
 
 - LLM steps hardcode source→target as **en→ru**. Non-LLM fallbacks use the original request params.
-- `max_tokens` is dynamic: `input_chars / 4 * multiplier`, clamped to `[256, cap]`. Set `"max_tokens": null` to disable.
+- `max_tokens` is dynamic: `input_chars / 4 × multiplier`, clamped to `[256, cap]`. Set `"max_tokens": null` to disable.
 
-## Dependencies
+## 📦 Dependencies
 
-`fastapi`, `uvicorn`, `openai`, `pydantic`, `httpx`, `python-dotenv`.
+```
+fastapi    uvicorn    openai
+pydantic   httpx      python-dotenv
+```
 
 ---
 
+<p align="center">
+  <img src="https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python" alt="Python">
+  <img src="https://img.shields.io/badge/FastAPI-0.115%2B-009688?style=for-the-badge&logo=fastapi" alt="FastAPI">
+  <img src="https://img.shields.io/badge/LLM-OpenAI--compatible-FF6F00?style=for-the-badge&logo=openai" alt="LLM">
+  <img src="https://img.shields.io/badge/status-active-brightgreen?style=for-the-badge" alt="Status">
+</p>
+
 # AILibreTranslater
 
-Самописный микросервис перевода на базе LLM с настраиваемой цепочкой fallback.
+> Самописный микросервис перевода на базе LLM с настраиваемой цепочкой fallback.
 
-## Быстрый старт
+---
+
+## 🚀 Быстрый старт
 
 ```bash
 pip install -r requirements.txt
@@ -99,9 +133,9 @@ cp .env.example .env
 python main.py
 ```
 
-Сервер запускается на `http://0.0.0.0:5555`.
+Сервер запускается на **http://0.0.0.0:5555**.
 
-## Использование
+## 📦 Использование
 
 ```bash
 curl -X POST http://localhost:5555/translate \
@@ -109,7 +143,7 @@ curl -X POST http://localhost:5555/translate \
   -d '{"q": "Hello world", "source": "auto", "target": "ru"}'
 ```
 
-## Архитектура
+## 🧱 Архитектура
 
 | Файл | Роль |
 |---|---|
@@ -118,9 +152,9 @@ curl -X POST http://localhost:5555/translate \
 | `config.py` | Провайдеры, цепочка перевода, пресеты |
 | `prompt_template.py` | Системный/пользовательский промпт (en→ru) |
 | `validator.py` | Валидация языка по скрипту (≥50% целевого алфавита) |
-| `cache_manager.py` | SHA256 JSON-кэш в директории `cache/` |
+| `cache_manager.py` | SHA256 JSON-кэш в `cache/` |
 
-## Конфигурация
+## ⚙️ Конфигурация
 
 Задаётся через `.env` или переменные окружения:
 
@@ -139,35 +173,51 @@ curl -X POST http://localhost:5555/translate \
 
 Выбор пресета: `python main.py --preset deepseek`. Интерактивный выбор при запуске, если пресет не указан.
 
-## Цепочка fallback
+## 🔗 Цепочка fallback
 
-Определяется в `config.py` как `TRANSLATION_CHAIN`. Шаги выполняются по порядку. При успехе — результат кэшируется и возвращается. При неудаче — выполняется следующий шаг.
+Определяется в `config.py` как `TRANSLATION_CHAIN`. Шаги выполняются по порядку:
 
-Два режима LLM:
+- ✅ **Успех** → результат кэшируется и возвращается
+- ❌ **Неудача** → выполняется следующий шаг
 
-- **chat** (по умолчанию): `chat.completions.create()` с системным/пользовательским сообщением и префиллом ассистента
-- **completions**: `completions.create()` с сырым промптом с токенами `<|channel|>` (без префилла)
+**Два режима LLM:**
 
-Не-LLM fallback: `google` (бесплатный API), `libretranslate`.
+- 💬 **chat** (по умолчанию): `chat.completions.create()` с системным/пользовательским сообщением и префиллом
+- ⚡ **completions**: `completions.create()` с сырым промптом и токенами `<|channel|>` (без префилла)
 
-## API Routes
+**Не-LLM fallback:** `google` (бесплатный API), `libretranslate`.
+
+## 🌐 API Routes
 
 | Метод | Путь | Описание |
 |---|---|---|
-| `POST` | `/translate` | Перевод текста (`q`, `source`, `target`) |
-| `GET` | `/cache` | Список записей кэша |
-| `DELETE` | `/cache/{hash_key}` | Удалить одну запись кэша |
-| `DELETE` | `/cache` | Очистить весь кэш |
+| 🟢 `POST` | `/translate` | Перевод текста (`q`, `source`, `target`) |
+| 🔵 `GET` | `/cache` | Список записей кэша |
+| 🔴 `DELETE` | `/cache/{hash_key}` | Удалить одну запись кэша |
+| 🔴 `DELETE` | `/cache` | Очистить весь кэш |
 
-## Валидация
+## ✅ Валидация
 
-Результат проверяется по алфавиту целевого языка (кириллица для ru/uk/be/bg/sr, CJK для zh/ja и т.д.). Не менее 50% буквенных символов должны относиться к целевому скрипту. Для неподдерживаемых языков валидация пропускается.
+Результат проверяется по алфавиту целевого языка. Не менее **50%** буквенных символов должны относиться к целевому скрипту:
 
-## Заметки
+- 🇷🇺 Кириллица — ru, uk, be, bg, sr
+- 🇨🇳 CJK — zh, ja, ko
+- 🇸🇦 Арабский — ar
+- 🇮🇱 Иврит — he
+- 🇹🇭 Тайский — th
+- 🇬🇷 Греческий — el
+- 🇮🇳 Деванагари — hi
+
+Для неподдерживаемых языков валидация пропускается.
+
+## 📝 Заметки
 
 - LLM-шаги жёстко задают source→target как **en→ru**. Не-LLM fallback используют оригинальные параметры запроса.
-- `max_tokens` вычисляется динамически: `input_chars / 4 * multiplier`, в диапазоне `[256, cap]`. Установите `"max_tokens": null` для отключения лимита.
+- `max_tokens` вычисляется динамически: `input_chars / 4 × multiplier`, в диапазоне `[256, cap]`. Установите `"max_tokens": null` для отключения лимита.
 
-## Зависимости
+## 📦 Зависимости
 
-`fastapi`, `uvicorn`, `openai`, `pydantic`, `httpx`, `python-dotenv`.
+```
+fastapi    uvicorn    openai
+pydantic   httpx      python-dotenv
+```
