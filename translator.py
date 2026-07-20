@@ -7,7 +7,7 @@ from openai import AsyncClient
 
 import cache_manager
 import config
-from prompt_template import format_prompt
+from prompt_template import LANGUAGE_NAMES, format_prompt
 from validator import validate_translation
 
 logger = logging.getLogger(__name__)
@@ -23,20 +23,27 @@ def restore_urls(original: str, translation: str) -> str:
         return translation
 
     trans_urls = URL_PATTERN.findall(translation)
-    replacements = {}
-    for orig_url, trans_url in zip(orig_urls, trans_urls):
-        if orig_url != trans_url:
-            replacements[trans_url] = orig_url
+    if not trans_urls:
+        return translation
 
-    if not replacements:
+    pairs = []
+    for i, (orig_url, trans_url) in enumerate(zip(orig_urls, trans_urls)):
+        if orig_url != trans_url:
+            pairs.append((i, trans_url, orig_url))
+
+    if not pairs:
         return translation
 
     result = translation
-    for wrong, correct in replacements.items():
-        result = result.replace(wrong, correct)
+    for i, trans_url, _ in reversed(pairs):
+        placeholder = f"\x00URL_{i}\x00"
+        result = result.replace(trans_url, placeholder, 1)
 
-    logger.debug("Restored %d URLs in translation: %s", len(replacements),
-                 {k[:60]: v[:60] for k, v in replacements.items()})
+    for i, _, orig_url in pairs:
+        placeholder = f"\x00URL_{i}\x00"
+        result = result.replace(placeholder, orig_url, 1)
+
+    logger.debug("Restored URLs in translation: %d pairs fixed", len(pairs))
     return result
 
 
@@ -68,6 +75,8 @@ async def _translate_google(text: str, source: str, target: str) -> str:
         resp = await client.get(url, params=params)
         resp.raise_for_status()
         data = resp.json()
+        if not data or not data[0]:
+            raise TranslationError("Google returned empty response")
         return "".join(part[0] for part in data[0])
 
 
@@ -86,6 +95,10 @@ async def _translate_libretranslate(text: str, source: str, target: str) -> str:
         resp = await client.post(config.LIBRETRANSLATE_URL, json=payload, headers=headers)
         resp.raise_for_status()
         data = resp.json()
+        if "error" in data:
+            raise TranslationError(f"LibreTranslate error: {data['error']}")
+        if "translatedText" not in data:
+            raise TranslationError(f"LibreTranslate unexpected response: {str(data)[:200]}")
         return data["translatedText"]
 
 
@@ -100,6 +113,15 @@ class LLMTranslator:
         self.chain = getattr(config, "TRANSLATION_CHAIN", self._default_chain())
         self._llm_clients: dict[str, AsyncClient] = {}
         self._validate_chain()
+
+    async def aclose(self):
+        for name, client in self._llm_clients.items():
+            try:
+                await client.aclose()
+                logger.debug("Closed client for provider %s", name)
+            except Exception as e:
+                logger.warning("Failed to close client for provider %s: %s", name, e)
+        self._llm_clients.clear()
 
     def _default_chain(self) -> list[dict]:
         return [
@@ -130,16 +152,6 @@ class LLMTranslator:
             )
         return self._llm_clients[provider_name]
 
-    def _clean_output(self, text: str) -> str:
-        text = re.sub(
-            r'\n{2,}(?:Wait|Let|I\s+(?:need|think|should|must|will|am|was|have|had|can|could|would)|Original:|Translation:|Note:|Here\'?s|Checking|Re-?check|Let\'?s|The\s+translation|After|Now|This|That|The\s+original|Step|Good|Perfect|Alright|Okay).*',
-            '',
-            text,
-            flags=re.DOTALL | re.IGNORECASE,
-        )
-        text = re.sub(r'\n---\s*\n.*', '', text, flags=re.DOTALL)
-        return text.strip()
-
     def _step_label(self, step: dict) -> str:
         t = step.get("type", "llm")
         if t == "llm":
@@ -149,14 +161,13 @@ class LLMTranslator:
         return t.capitalize()
 
     async def translate(self, text: str, source: str, target: str) -> dict:
-        original_source = source
-        original_target = target
-        llm_source = "en"
-        llm_target = "ru"
+        source_lang = source if source != "auto" else source
+        target_lang = target
 
-        cached = cache_manager.get_cache(original_source, original_target, text)
+        cached = cache_manager.get_cache(source_lang, target_lang, text)
         if cached is not None:
             logger.info("Using cached translation")
+            cached = restore_urls(text, cached)
             return {"translatedText": cached}
 
         if not self.chain:
@@ -174,11 +185,11 @@ class LLMTranslator:
             try:
                 if step_type == "llm":
                     result = await self._translate_via_llm(
-                        text, llm_source, llm_target, step, step["provider"]
+                        text, source_lang, target_lang, step, step["provider"]
                     )
                 elif step_type in _NON_LLM_TRANSLATORS:
                     result = await _NON_LLM_TRANSLATORS[step_type](
-                        text, original_source, original_target
+                        text, source_lang, target_lang
                     )
                 else:
                     logger.warning("[%d/%d] %s — unknown step type, skipped", step_num, total, label)
@@ -193,7 +204,7 @@ class LLMTranslator:
                     logger.info("[%d/%d] %s — SUCCESS (%.1fs)", step_num, total, label, elapsed)
                     if config.LOG_TRANSLATION_CONTENT:
                         logger.info("Content: %s", clean)
-                    cache_manager.set_cache(original_source, original_target, text, clean)
+                    cache_manager.set_cache(source_lang, target_lang, text, clean)
                     return {"translatedText": clean}
 
                 logger.warning("[%d/%d] %s — empty result (%.1fs)", step_num, total, label, elapsed)
@@ -294,10 +305,8 @@ class LLMTranslator:
             content = content[len(prefill_text):]
 
         content = content.strip()
-        # If the model outputs English paraphrase before Перевод:, keep only the Russian part
         if "\n\nПеревод:" in content:
             content = content.split("\n\nПеревод:", 1)[-1].strip()
-        content = self._clean_output(content)
 
         if not validate_translation(content, target):
             logger.warning(
@@ -313,9 +322,12 @@ class LLMTranslator:
         self, text: str, source: str, target: str, step: dict, provider_name: str,
         client, model: str, cfg: dict,
     ) -> str:
+        source_name = LANGUAGE_NAMES.get(source, source)
+        target_name = LANGUAGE_NAMES.get(target, target)
+
         prompt = (
             f"<|channel|>user\n"
-            f"Переведи следующий текст с английского на русский:\n\n{text}\n\n"
+            f"Переведи следующий текст с {source_name} на {target_name}:\n\n{text}\n\n"
             f"Перевод:<|channel|>\n"
             f"<|channel|>assistant\n"
         )
@@ -360,13 +372,10 @@ class LLMTranslator:
                 f"LLM returned empty response (finish_reason={finish_reason})",
             )
 
-        # Model outputs: <|channel|>thought\n...<|channel|>\n...translation...
-        # Strip thought block — take everything after the last <|channel|> tag
         if "<|channel|>" in content:
             content = content.split("<|channel|>")[-1]
         elif "<|channel>" in content:
             content = content.split("<|channel>")[-1]
-        # Strip trailing channel tags if any
         if "<|channel|>" in content:
             content = content.split("<|channel|>")[0]
         elif "<|channel>" in content:
@@ -375,7 +384,6 @@ class LLMTranslator:
         content = content.strip()
         if "\n\nПеревод:" in content:
             content = content.split("\n\nПеревод:", 1)[-1].strip()
-        content = self._clean_output(content)
 
         if not validate_translation(content, target):
             logger.warning(

@@ -34,15 +34,6 @@ LIBRETRANSLATE_API_KEY = os.getenv("LIBRETRANSLATE_API_KEY", "")
 LOG_TRANSLATION_CONTENT = os.getenv("LOG_TRANSLATION_CONTENT", "false").lower() == "true"
 
 PRESETS: dict[str, dict] = {
-    "default": {
-        "name": "Default (Local LLM)",
-        "description": "Local Qwen model via chat then completions fallback",
-        "default_provider": "localllm",
-        "translation_chain": [
-            {"type": "llm", "provider": "localllm", "multiplier": 8, "cap": 16384},
-            {"type": "llm", "provider": "localllm", "mode": "completions", "temperature": 0.3, "multiplier": 10, "cap": 32768},
-        ],
-    },
     "deepseek": {
         "name": "DeepSeek",
         "description": "DeepSeek API for translation with Google/LibreTranslate fallback",
@@ -67,31 +58,6 @@ def load_preset(name: str) -> dict | None:
         logger.error("Preset '%s' not found. Available: %s", name, list(PRESETS.keys()))
         return None
     return dict(PRESETS[name])
-
-
-def choose_preset_interactive() -> str:
-    presets = list_presets()
-    if not presets:
-        return "default"
-
-    print("\nAvailable presets:")
-    for i, p in enumerate(presets, 1):
-        desc = p["description"]
-        print(f"  {i}. {p['name']}" + (f" — {desc}" if desc else ""))
-
-    while True:
-        try:
-            choice = input(f"\nSelect preset [1-{len(presets)}] (default 1): ").strip()
-            if not choice:
-                choice = "1"
-            idx = int(choice) - 1
-            if 0 <= idx < len(presets):
-                print(f"Selected: {presets[idx]['name']}\n")
-                return presets[idx]["key"]
-            print(f"Please enter a number between 1 and {len(presets)}")
-        except (ValueError, EOFError, KeyboardInterrupt):
-            print()
-            return presets[0]["key"] if presets else "default"
 
 
 def apply_preset(preset: dict):

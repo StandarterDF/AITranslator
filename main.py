@@ -1,5 +1,6 @@
 import os
 import sys
+from contextlib import asynccontextmanager
 from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 
@@ -28,6 +29,32 @@ for i, arg in enumerate(sys.argv):
     if arg == "--preset" and i + 1 < len(sys.argv):
         _preset_name = sys.argv[i + 1]
 
+
+def _choose_preset_interactive() -> str:
+    presets = config.list_presets()
+    if not presets:
+        return "default"
+
+    print("\nAvailable presets:")
+    for i, p in enumerate(presets, 1):
+        desc = p["description"]
+        print(f"  {i}. {p['name']}" + (f" — {desc}" if desc else ""))
+
+    while True:
+        try:
+            choice = input(f"\nSelect preset [1-{len(presets)}] (default 1): ").strip()
+            if not choice:
+                choice = "1"
+            idx = int(choice) - 1
+            if 0 <= idx < len(presets):
+                print(f"Selected: {presets[idx]['name']}\n")
+                return presets[idx]["key"]
+            print(f"Please enter a number between 1 and {len(presets)}")
+        except (ValueError, EOFError, KeyboardInterrupt):
+            print()
+            return presets[0]["key"] if presets else "default"
+
+
 if _preset_name is not None:
     loaded = config.load_preset(_preset_name)
     if loaded is None:
@@ -44,7 +71,19 @@ except ValueError as e:
     print(f"Configuration error: {e}")
     sys.exit(1)
 
-app = FastAPI(title="AILibreTranslater")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    yield
+    await translator.aclose()
+
+
+app = FastAPI(title="AILibreTranslater", lifespan=lifespan)
+
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
 
 
 @app.post("/translate")
@@ -109,17 +148,11 @@ async def invalidate_cache_entry(hash_key: str):
     return {"detail": "Cache entry invalidated"}
 
 
-@app.delete("/cache")
-async def clear_all_cache():
-    count = cache_manager.clear_cache()
-    return {"detail": f"Cleared {count} cache entries"}
-
-
 if __name__ == "__main__":
     import uvicorn
 
     if _preset_name is None and "--preset" not in sys.argv:
-        _preset_name = config.choose_preset_interactive()
+        _preset_name = _choose_preset_interactive()
 
     if _preset_name is not None:
         os.environ["TRANSLATOR_PRESET"] = _preset_name

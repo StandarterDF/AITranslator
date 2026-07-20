@@ -10,6 +10,7 @@ THAI = re.compile(r"[\u0E00-\u0E7F]")
 GREEK = re.compile(r"[\u0370-\u03FF\u1F00-\u1FFF]")
 DEVANAGARI = re.compile(r"[\u0900-\u097F]")
 HANGUL = re.compile(r"[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]")
+LATIN = re.compile(r"[a-zA-Z\u00C0-\u024F\u1E00-\u1EFF\u2C00-\u2C5F\uA720-\uA7FF]")
 
 LANGUAGE_SCRIPTS: dict[str, tuple[re.Pattern, ...]] = {
     "ru": (CYRILLIC,),
@@ -25,6 +26,25 @@ LANGUAGE_SCRIPTS: dict[str, tuple[re.Pattern, ...]] = {
     "th": (THAI,),
     "el": (GREEK,),
     "hi": (DEVANAGARI,),
+    "en": (LATIN,),
+    "es": (LATIN,),
+    "fr": (LATIN,),
+    "de": (LATIN,),
+    "it": (LATIN,),
+    "pt": (LATIN,),
+    "nl": (LATIN,),
+    "pl": (LATIN,),
+    "tr": (LATIN,),
+    "vi": (LATIN,),
+    "cs": (LATIN,),
+    "sv": (LATIN,),
+    "da": (LATIN,),
+    "fi": (LATIN,),
+    "id": (LATIN,),
+    "ms": (LATIN,),
+    "no": (LATIN,),
+    "ro": (LATIN,),
+    "hu": (LATIN,),
 }
 
 
@@ -33,9 +53,15 @@ def validate_translation(text: str, target_lang: str, threshold: float = 0.5) ->
     if patterns is None:
         return True
 
-    total = sum(1 for c in text if c.isalpha())
+    total = 0
+    matching = 0
+    for c in text:
+        if c.isalpha():
+            total += 1
+            if any(p.match(c) for p in patterns):
+                matching += 1
+
     if total == 0:
         return True
 
-    matching = sum(1 for c in text if any(p.match(c) for p in patterns))
     return (matching / total) >= threshold

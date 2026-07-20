@@ -1,7 +1,6 @@
 import hashlib
 import json
 import logging
-import os
 import time
 from pathlib import Path
 
@@ -104,7 +103,11 @@ def clear_cache() -> int:
 def list_cache() -> list[dict]:
     _ensure_cache_dir()
     entries = []
-    for p in sorted(CACHE_DIR.glob("*.json"), key=os.path.getmtime, reverse=True):
+    for p in CACHE_DIR.glob("*.json"):
+        try:
+            mtime = p.stat().st_mtime
+        except OSError:
+            continue
         try:
             data = json.loads(p.read_text("utf-8"))
             entries.append({
@@ -113,10 +116,11 @@ def list_cache() -> list[dict]:
                 "target": data.get("target", ""),
                 "source_text_preview": data.get("source_text", "")[:80],
                 "translated_text_preview": data.get("translated_text", "")[:80],
-                "created_at": data.get("created_at", 0),
+                "created_at": data.get("created_at", mtime),
                 "size": len(data.get("source_text", "")),
                 "invalid": data.get("invalid", False),
             })
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to read %s: %s", p.name, e)
+    entries.sort(key=lambda e: e["created_at"], reverse=True)
     return entries

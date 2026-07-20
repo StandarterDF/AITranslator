@@ -8,3 +8,6 @@ cache/*.json
 
 # Environment — contains secrets
 .env
+
+# Bug tracker — personal notes, not code
+ISSUES.md
