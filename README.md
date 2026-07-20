@@ -99,19 +99,6 @@ Output is validated per language script. At least **50%** of alphabetic characte
 
 Falls through (always valid) for unsupported languages.
 
-## 📝 Notes
-
-- LLM steps respect the request's `source`/`target` parameters. Prompts are generated dynamically using language names from `LANGUAGE_NAMES`.
-- `max_tokens` is dynamic: `input_chars / 4 × multiplier`, clamped to `[256, cap]`. Set `"max_tokens": null` to disable.
-- The `DELETE /cache` (clear all) endpoint has been removed for safety. Use `DELETE /cache/{hash_key}` to delete individual entries.
-
-## 🧪 Tests
-
-```bash
-pip install pytest
-python -m pytest test_translator.py -v
-```
-
 ## 📦 Dependencies
 
 ```
@@ -221,19 +208,6 @@ curl -X POST http://localhost:5555/translate \
 - 🔤 Латиница — en, es, fr, de, it, pt, nl, pl, tr, vi, cs, sv, da, fi, id, ms, no, ro, hu
 
 Для неподдерживаемых языков валидация пропускается.
-
-## 📝 Заметки
-
-- LLM-шаги используют переданные параметры `source`/`target`. Промпты генерируются динамически на основе названий языков из `LANGUAGE_NAMES`.
-- `max_tokens` вычисляется динамически: `input_chars / 4 × multiplier`, в диапазоне `[256, cap]`. Установите `"max_tokens": null` для отключения лимита.
-- Эндпоинт `DELETE /cache` (полная очистка) удалён из соображений безопасности. Используйте `DELETE /cache/{hash_key}` для удаления отдельных записей.
-
-## 🧪 Тесты
-
-```bash
-pip install pytest
-python -m pytest test_translator.py -v
-```
 
 ## 📦 Зависимости
 
