@@ -223,7 +223,7 @@ curl -X POST http://localhost:5555/translate \
 
 | Светлая тема | Тёмная тема |
 |---|---|
-| ![Web UI светлая](static/img/webui.jpg) | ![Web UI тёмная](static/img/webui_black.jpg) |
+| <img alt="Web UI светлая" src="static/img/webui.jpg" width="450"> | <img alt="Web UI тёмная" src="static/img/webui_black.jpg" width="450"> |
 
 ## 🌐 API Routes
 
