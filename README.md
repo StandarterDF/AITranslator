@@ -42,6 +42,7 @@ curl -X POST http://localhost:5555/translate \
 |---|---|
 | `main.py` | FastAPI app, routes, uvicorn launcher |
 | `static/index.html` | Web UI — Google Translate-style translation interface |
+| `tui.py` | TUI — Textual-based terminal translation interface |
 | `translator.py` | `LLMTranslator` — fallback chain execution |
 | `config.py` | Providers, chain definition, presets |
 | `prompt_template.py` | Dynamic system/user prompt templates (any language pair) |
@@ -93,6 +94,25 @@ Browser-based translation interface (Google Translate style) at the root URL.
 | Light theme | Dark theme |
 |---|---|
 | <img alt="Web UI light" src="static/img/webui.jpg" width="450"> | <img alt="Web UI dark" src="static/img/webui_black.jpg" width="450"> |
+
+## 🖥 TUI
+
+Terminal-based translation interface (Textual) — a full-featured TUI for quick translations without leaving the terminal.
+
+- `python tui.py` — launches the TUI with a translation panel, log viewer, and status bar
+- Two-panel layout: source input (top) and translation output (bottom)
+- Live server log stream in a dedicated panel
+- Keyboard-driven workflow:
+  - `Tab` — cycle focus between panels
+  - `Ctrl+T` — swap source/target languages
+  - `Ctrl+C` — copy translation result
+  - `Ctrl+Q` — quit
+- TUI automatically starts the FastAPI server as a subprocess if not already running, or connects to an existing instance on `localhost:5555`
+- Serves as a standalone alternative to the Web UI — useful for server administration or headless environments
+
+| TUI main screen |
+|---|
+| <img alt="TUI" src="static/TUI.jpg" width="600"> |
 
 ## 🌐 API Routes
 
@@ -173,6 +193,7 @@ curl -X POST http://localhost:5555/translate \
 |---|---|
 | `main.py` | FastAPI приложение, роуты, запуск uvicorn |
 | `static/index.html` | Web UI — интерфейс перевода в стиле Google Translate |
+| `tui.py` | TUI — терминальный интерфейс перевода на Textual |
 | `translator.py` | `LLMTranslator` — исполнение цепочки fallback |
 | `config.py` | Провайдеры, цепочка перевода, пресеты |
 | `prompt_template.py` | Динамический системный/пользовательский промпт (любая языковая пара) |
@@ -224,6 +245,25 @@ curl -X POST http://localhost:5555/translate \
 | Светлая тема | Тёмная тема |
 |---|---|
 | <img alt="Web UI светлая" src="static/img/webui.jpg" width="450"> | <img alt="Web UI тёмная" src="static/img/webui_black.jpg" width="450"> |
+
+## 🖥 TUI
+
+Терминальный интерфейс перевода на базе Textual — полнофункциональный TUI для быстрых переводов без выхода в браузер.
+
+- `python tui.py` — запускает TUI с панелью перевода, лог-вьювером и статус-баром
+- Двухпанельная раскладка: ввод исходного текста (сверху) и результат перевода (снизу)
+- Прямая трансляция логов сервера в отдельной панели
+- Управление с клавиатуры:
+  - `Tab` — циклическое переключение фокуса между панелями
+  - `Ctrl+T` — смена языков местами
+  - `Ctrl+C` — копирование результата перевода
+  - `Ctrl+Q` — выход
+- TUI автоматически запускает FastAPI сервер как подпроцесс, либо подключается к уже запущенному на `localhost:5555`
+- Полноценная альтернатива Web UI — удобно для администрирования сервера или окружений без браузера
+
+| Главный экран TUI |
+|---|
+| <img alt="TUI" src="static/TUI.jpg" width="600"> |
 
 ## 🌐 API Routes
 
