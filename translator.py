@@ -286,7 +286,7 @@ class LLMTranslator:
         extra_body = {}
         if api_type == "deepseek":
             if reasoning_effort:
-                extra_body["thinking"] = {"reasoning_effort": reasoning_effort}
+                extra_body["thinking"] = {"type": "enabled", "reasoning_effort": reasoning_effort}
         else:
             if reasoning_effort:
                 extra_body["reasoning_effort"] = reasoning_effort
