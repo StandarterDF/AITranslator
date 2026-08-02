@@ -8,5 +8,23 @@ if not exist "%VENV_DIR%\Scripts\python.exe" (
     exit /b 1
 )
 
+echo.
+echo === AILibreTranslater ===
+echo.
+echo  1 - TUI (Textual interface)
+echo  2 - Server (console)
+echo.
+set /p "CHOICE=Select mode [1-2] (default 1): "
+if "%CHOICE%"=="2" goto server
+if "%CHOICE%"=="" goto tui
+
+:tui
+call "%VENV_DIR%\Scripts\python" tui.py %*
+goto end
+
+:server
 call "%VENV_DIR%\Scripts\python" main.py %*
+goto end
+
+:end
 pause

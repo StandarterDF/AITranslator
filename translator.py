@@ -113,6 +113,11 @@ class LLMTranslator:
         self.chain = getattr(config, "TRANSLATION_CHAIN", self._default_chain())
         self._llm_clients: dict[str, AsyncClient] = {}
         self._validate_chain()
+        self.prompt_tokens: int = 0
+        self.completion_tokens: int = 0
+        self.reasoning_effort: dict[str, str | None] = {
+            p: config.get_reasoning_effort(p) for p in config.PROVIDERS
+        }
 
     async def aclose(self):
         for name, client in self._llm_clients.items():
@@ -159,6 +164,25 @@ class LLMTranslator:
             m = config.PROVIDERS[p]["model"]
             return f"LLM {p}/{m}"
         return t.capitalize()
+
+    def set_reasoning_effort(self, provider: str, effort: str | None) -> None:
+        if provider not in self.reasoning_effort:
+            raise ValueError(f"Unknown provider '{provider}'")
+        self.reasoning_effort[provider] = effort
+        config.set_reasoning_effort(provider, effort)
+        logger.debug("Reasoning effort for %s set to %s", provider, effort)
+
+    def toggle_reasoning(self, provider: str, direction: str = "next") -> str | None:
+        effort = self.reasoning_effort.get(provider)
+        levels = config.REASONING_EFFORT_LEVELS
+        if direction == "prev":
+            idx = (levels.index(effort) - 1) % len(levels) if effort in levels else len(levels) - 1
+            new_effort = levels[idx]
+        else:
+            idx = (levels.index(effort) + 1) % len(levels) if effort in levels else 0
+            new_effort = levels[idx]
+        self.set_reasoning_effort(provider, new_effort)
+        return new_effort
 
     async def translate(self, text: str, source: str, target: str) -> dict:
         source_lang = source if source != "auto" else source
@@ -251,10 +275,21 @@ class LLMTranslator:
 
         temperature = step.get("temperature", 0.0)
 
+        api_type = cfg.get("api_type", "openai")
+
+        reasoning_effort = (
+            step.get("reasoning_effort")
+            or self.reasoning_effort.get(provider_name)
+            or cfg.get("reasoning_effort")
+        )
+
         extra_body = {}
-        reasoning_effort = step.get("reasoning_effort") or cfg.get("reasoning_effort")
-        if reasoning_effort:
-            extra_body["reasoning_effort"] = reasoning_effort
+        if api_type == "deepseek":
+            if reasoning_effort:
+                extra_body["thinking"] = {"reasoning_effort": reasoning_effort}
+        else:
+            if reasoning_effort:
+                extra_body["reasoning_effort"] = reasoning_effort
 
         step_multiplier = step.get("multiplier", 5.0)
         step_cap = step.get("cap", 16384)
@@ -267,9 +302,11 @@ class LLMTranslator:
         logger.debug("Messages sent:\n%s",
             "\n".join(f"  [{m['role']}] {m['content'][:200]}" for m in messages))
         logger.debug(
-            "LLM request: provider=%s model=%s max_tokens=%s temp=%.1f prefill=%s input_chars=%d",
-            provider_name, model, str(max_tokens), temperature,
-            "yes" if prefill_text else "no", len(text),
+            "LLM request: provider=%s model=%s api_type=%s max_tokens=%s temp=%.1f prefill=%s reasoning=%s input_chars=%d",
+            provider_name, model, api_type, str(max_tokens), temperature,
+            "yes" if prefill_text else "no",
+            extra_body.get("reasoning_effort") or (extra_body.get("thinking") or {}).get("reasoning_effort"),
+            len(text),
         )
 
         if max_tokens is not None:
@@ -291,9 +328,11 @@ class LLMTranslator:
         content = response.choices[0].message.content
         finish_reason = response.choices[0].finish_reason
         usage = response.usage
-        logger.debug("Raw response: finish_reason=%s content=%r", finish_reason, content)
         if usage:
+            self.prompt_tokens += usage.prompt_tokens
+            self.completion_tokens += usage.completion_tokens
             logger.debug("Token usage: %s", usage)
+        logger.debug("Raw response: finish_reason=%s content=%r", finish_reason, content)
 
         if content is None:
             logger.warning("LLM returned empty (finish_reason=%s)", finish_reason)
@@ -363,9 +402,11 @@ class LLMTranslator:
         content = response.choices[0].text
         finish_reason = response.choices[0].finish_reason
         usage = response.usage
-        logger.debug("Raw completions: finish_reason=%s content=%r", finish_reason, content)
         if usage:
+            self.prompt_tokens += usage.prompt_tokens
+            self.completion_tokens += usage.completion_tokens
             logger.debug("Token usage: %s", usage)
+        logger.debug("Raw completions: finish_reason=%s content=%r", finish_reason, content)
 
         if not content or not content.strip():
             raise TranslationError(

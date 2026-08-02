@@ -6,6 +6,12 @@ load_dotenv()
 
 logger = logging.getLogger(__name__)
 
+# "openai"  — OpenAI-compatible chat.completions (messages, reasoning_effort in extra_body)
+# "deepseek" — native DeepSeek API (top-level "thinking": {"reasoning_effort": ...})
+API_TYPES = ("openai", "deepseek")
+
+REASONING_EFFORT_LEVELS = ("low", "high", "max")
+
 PROVIDERS: dict[str, dict] = {
     "localllm": {
         "api_key": os.getenv("LOCALLLM_API_KEY", "sk-LocalHost"),
@@ -18,6 +24,8 @@ PROVIDERS: dict[str, dict] = {
         "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
         "model": os.getenv("DEEPSEEK_MODEL", "deepseek-chat"),
         "prefill": os.getenv("DEEPSEEK_PREFILL", ""),
+        "api_type": os.getenv("DEEPSEEK_API_TYPE", "openai"),
+        "reasoning_effort": os.getenv("DEEPSEEK_REASONING_EFFORT", "low"),
     },
 }
 
@@ -60,6 +68,20 @@ def list_presets() -> list[dict]:
         {"key": key, "name": p.get("name", key), "description": p.get("description", "")}
         for key, p in PRESETS.items()
     ]
+
+
+def get_reasoning_effort(provider: str) -> str | None:
+    cfg = PROVIDERS.get(provider)
+    if not cfg:
+        return None
+    return cfg.get("reasoning_effort")
+
+
+def set_reasoning_effort(provider: str, effort: str | None) -> None:
+    cfg = PROVIDERS.get(provider)
+    if not cfg:
+        raise ValueError(f"Unknown provider '{provider}'")
+    cfg["reasoning_effort"] = effort
 
 
 def load_preset(name: str) -> dict | None:

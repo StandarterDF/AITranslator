@@ -291,6 +291,7 @@ class TranslatorTUI(App):
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit"),
         Binding("f1", "select_preset", "Preset"),
+        Binding("f2", "toggle_reasoning", "Reasoning"),
         Binding("f5", "clear_log", "Clear log"),
         Binding("f3", "restart_server", "Restart"),
         Binding("f6", "copy_logs", "Copy logs"),
@@ -421,6 +422,8 @@ class TranslatorTUI(App):
             icon = STATUS_WAIT
 
         preset_name = self._current_preset_name or "default"
+        effort = self._current_effort()
+        effort_str = str(effort) if effort is not None else "off"
         chain_info = ""
         try:
             chain = cfg.TRANSLATION_CHAIN
@@ -444,6 +447,7 @@ class TranslatorTUI(App):
                 "──────────────────────────\n"
                 f"[bold]Preset:[/bold]       [#44bbdd]{preset_name}[/#44bbdd]\n"
                 f"[bold]Chain:[/bold]        [#44bbdd]{chain_info}[/#44bbdd]\n"
+                f"[bold]Reasoning:[/bold]    [#ffaa33]{effort_str}[/#ffaa33]  [dim](F2)[/dim]\n"
                 f"[bold]Port:[/bold]         [#ffaa33]5555[/#ffaa33]\n"
                 f"[bold]Translations:[/bold] [#33aa33]{self.msg_count}[/#33aa33]\n"
                 f"[bold]Errors:[/bold]       [#cc3333]{self.err_count}[/#cc3333]\n"
@@ -499,6 +503,30 @@ class TranslatorTUI(App):
         self._all_logs.clear()
         self.start_time = datetime.now()
         server_proc.restart(self._current_preset_key)
+
+    def _current_effort(self) -> str | None:
+        t = server_proc.translator
+        if t:
+            return t.reasoning_effort.get(cfg.DEFAULT_PROVIDER)
+        return None
+
+    def _toggle_effort_direct(self, direction: str = "next"):
+        try:
+            t = server_proc.translator
+            if t:
+                effort = t.toggle_reasoning(cfg.DEFAULT_PROVIDER, direction)
+                self._status_msg = f"Reasoning: {effort}"
+                self._update_status()
+                self._write_raw(
+                    f"[bold #44bbdd]>> Reasoning: {effort}[/bold #44bbdd]"
+                )
+            else:
+                self._write_raw("[dim]Server not running yet[/dim]")
+        except Exception as e:
+            self._write_raw(f"[#cc3333]Failed: {e}[/#cc3333]")
+
+    def action_toggle_reasoning(self):
+        self._toggle_effort_direct("next")
 
     def action_clear_log(self):
         w = self.query_one("#log-widget", RichLog)

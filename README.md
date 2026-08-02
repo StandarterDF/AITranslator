@@ -61,6 +61,8 @@ Set via `.env` or environment variables:
 | `DEEPSEEK_API_KEY` | — | DeepSeek API key |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | DeepSeek endpoint |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | DeepSeek model |
+| `DEEPSEEK_API_TYPE` | `openai` | `openai` = OpenAI-compatible chat.completions; `deepseek` = native API (top-level `thinking` object) |
+| `DEEPSEEK_REASONING_EFFORT` | `low` | `low` \| `high` \| `max` — reasoning effort (TUI F2 toggles at runtime) |
 | `LIBRETRANSLATE_URL` | `https://libretranslate.com/translate` | LibreTranslate endpoint |
 | `LOG_TRANSLATION_CONTENT` | `false` | Log translated text |
 
@@ -79,6 +81,13 @@ Defined in `config.py` as `TRANSLATION_CHAIN`. Each step is tried in order:
 
 - 💬 **chat** (default): `chat.completions.create()` with system/user/assistant messages
 - ⚡ **completions**: `completions.create()` with raw `<|channel|>`-token prompt (no prefill)
+
+**API types per provider** (`api_type` in `PROVIDERS`):
+
+- 🔵 `openai` (default): OpenAI-compatible `chat.completions`, reasoning effort sent as `extra_body["reasoning_effort"]`
+- 🔴 `deepseek`: native DeepSeek API, reasoning effort sent as top-level `"thinking": {"reasoning_effort": ...}`
+
+Reasoning effort (`low`/`high`/`max`) defaults to `DEEPSEEK_REASONING_EFFORT` and is toggleable at runtime in the TUI with `F2`.
 
 **Non-LLM fallbacks:** `google` (free API), `libretranslate`.
 
@@ -212,6 +221,8 @@ curl -X POST http://localhost:5555/translate \
 | `DEEPSEEK_API_KEY` | — | API-ключ DeepSeek |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | Эндпоинт DeepSeek |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | Модель DeepSeek |
+| `DEEPSEEK_API_TYPE` | `openai` | `openai` = OpenAI-совместимые chat.completions; `deepseek` = нативный API (top-level `thinking`) |
+| `DEEPSEEK_REASONING_EFFORT` | `low` | `low` \| `high` \| `max` — режим мышления (в TUI переключается по F2 на лету) |
 | `LIBRETRANSLATE_URL` | `https://libretranslate.com/translate` | Эндпоинт LibreTranslate |
 | `LOG_TRANSLATION_CONTENT` | `false` | Логировать текст перевода |
 
@@ -230,6 +241,13 @@ curl -X POST http://localhost:5555/translate \
 
 - 💬 **chat** (по умолчанию): `chat.completions.create()` с системным/пользовательским сообщением и префиллом
 - ⚡ **completions**: `completions.create()` с сырым промптом и токенами `<|channel|>` (без префилла)
+
+**Типы API провайдеров** (`api_type` в `PROVIDERS`):
+
+- 🔵 `openai` (по умолчанию): OpenAI-совместимые `chat.completions`, режим мышления уходит как `extra_body["reasoning_effort"]`
+- 🔴 `deepseek`: нативный DeepSeek API, режим мышления уходит как top-level `"thinking": {"reasoning_effort": ...}`
+
+Режим мышления (`low`/`high`/`max`) по умолчанию из `DEEPSEEK_REASONING_EFFORT`, на лету переключается в TUI клавишей `F2`.
 
 **Не-LLM fallback:** `google` (бесплатный API), `libretranslate`.
 
