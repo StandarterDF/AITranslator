@@ -174,13 +174,15 @@ class LLMTranslator:
 
     def toggle_reasoning(self, provider: str, direction: str = "next") -> str | None:
         effort = self.reasoning_effort.get(provider)
-        levels = config.REASONING_EFFORT_LEVELS
+        levels = list(config.REASONING_EFFORT_LEVELS)
         if direction == "prev":
-            idx = (levels.index(effort) - 1) % len(levels) if effort in levels else len(levels) - 1
-            new_effort = levels[idx]
+            seq = [None] + levels
+            idx = seq.index(effort) - 1 if effort in seq else len(seq) - 1
+            new_effort = seq[idx % len(seq)]
         else:
-            idx = (levels.index(effort) + 1) % len(levels) if effort in levels else 0
-            new_effort = levels[idx]
+            seq = levels + [None]
+            idx = seq.index(effort) + 1 if effort in seq else 0
+            new_effort = seq[idx % len(seq)]
         self.set_reasoning_effort(provider, new_effort)
         return new_effort
 
@@ -277,18 +279,19 @@ class LLMTranslator:
 
         api_type = cfg.get("api_type", "openai")
 
-        reasoning_effort = (
-            step.get("reasoning_effort")
-            or self.reasoning_effort.get(provider_name)
-            or cfg.get("reasoning_effort")
-        )
+        if "reasoning_effort" in step:
+            reasoning_effort = step["reasoning_effort"]
+        else:
+            reasoning_effort = self.reasoning_effort.get(provider_name)
 
         extra_body = {}
         if api_type == "deepseek":
-            if reasoning_effort:
+            if reasoning_effort is None:
+                extra_body["thinking"] = {"type": "disabled"}
+            else:
                 extra_body["thinking"] = {"type": "enabled", "reasoning_effort": reasoning_effort}
         else:
-            if reasoning_effort:
+            if reasoning_effort is not None:
                 extra_body["reasoning_effort"] = reasoning_effort
 
         step_multiplier = step.get("multiplier", 5.0)
@@ -305,7 +308,9 @@ class LLMTranslator:
             "LLM request: provider=%s model=%s api_type=%s max_tokens=%s temp=%.1f prefill=%s reasoning=%s input_chars=%d",
             provider_name, model, api_type, str(max_tokens), temperature,
             "yes" if prefill_text else "no",
-            extra_body.get("reasoning_effort") or (extra_body.get("thinking") or {}).get("reasoning_effort"),
+            (extra_body.get("thinking") or {}).get("reasoning_effort")
+            or extra_body.get("reasoning_effort")
+            or ("off" if (extra_body.get("thinking") or {}).get("type") == "disabled" else "None"),
             len(text),
         )
 

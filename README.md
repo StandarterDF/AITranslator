@@ -62,7 +62,7 @@ Set via `.env` or environment variables:
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | DeepSeek endpoint |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | DeepSeek model |
 | `DEEPSEEK_API_TYPE` | `openai` | `openai` = OpenAI-compatible chat.completions; `deepseek` = native API (top-level `thinking` object) |
-| `DEEPSEEK_REASONING_EFFORT` | `low` | `low` \| `high` \| `max` — reasoning effort (TUI F2 toggles at runtime) |
+| `DEEPSEEK_REASONING_EFFORT` | `low` | `low` \| `high` \| `max` — reasoning effort (`off` to disable; TUI F2 toggles at runtime) |
 | `LIBRETRANSLATE_URL` | `https://libretranslate.com/translate` | LibreTranslate endpoint |
 | `LOG_TRANSLATION_CONTENT` | `false` | Log translated text |
 
@@ -87,7 +87,7 @@ Defined in `config.py` as `TRANSLATION_CHAIN`. Each step is tried in order:
 - 🔵 `openai` (default): OpenAI-compatible `chat.completions`, reasoning effort sent as `extra_body["reasoning_effort"]`
 - 🔴 `deepseek`: native DeepSeek API, reasoning effort sent as top-level `"thinking": {"reasoning_effort": ...}`
 
-Reasoning effort (`low`/`high`/`max`) defaults to `DEEPSEEK_REASONING_EFFORT` and is toggleable at runtime in the TUI with `F2`.
+Reasoning effort (`low`/`high`/`max`, or `off` to disable) defaults to `DEEPSEEK_REASONING_EFFORT` and is toggleable at runtime in the TUI with `F2`.
 
 **Non-LLM fallbacks:** `google` (free API), `libretranslate`.
 
@@ -222,7 +222,7 @@ curl -X POST http://localhost:5555/translate \
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | Эндпоинт DeepSeek |
 | `DEEPSEEK_MODEL` | `deepseek-chat` | Модель DeepSeek |
 | `DEEPSEEK_API_TYPE` | `openai` | `openai` = OpenAI-совместимые chat.completions; `deepseek` = нативный API (top-level `thinking`) |
-| `DEEPSEEK_REASONING_EFFORT` | `low` | `low` \| `high` \| `max` — режим мышления (в TUI переключается по F2 на лету) |
+| `DEEPSEEK_REASONING_EFFORT` | `low` | `low` \| `high` \| `max` — режим мышления (`off` — выключить; в TUI переключается по F2 на лету) |
 | `LIBRETRANSLATE_URL` | `https://libretranslate.com/translate` | Эндпоинт LibreTranslate |
 | `LOG_TRANSLATION_CONTENT` | `false` | Логировать текст перевода |
 

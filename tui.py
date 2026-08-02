@@ -509,16 +509,16 @@ class TranslatorTUI(App):
         if t:
             return t.reasoning_effort.get(cfg.DEFAULT_PROVIDER)
         return None
-
     def _toggle_effort_direct(self, direction: str = "next"):
         try:
             t = server_proc.translator
             if t:
                 effort = t.toggle_reasoning(cfg.DEFAULT_PROVIDER, direction)
-                self._status_msg = f"Reasoning: {effort}"
+                label = "off" if effort is None else effort
+                self._status_msg = f"Reasoning: {label}"
                 self._update_status()
                 self._write_raw(
-                    f"[bold #44bbdd]>> Reasoning: {effort}[/bold #44bbdd]"
+                    f"[bold #44bbdd]>> Reasoning: {label}[/bold #44bbdd]"
                 )
             else:
                 self._write_raw("[dim]Server not running yet[/dim]")
