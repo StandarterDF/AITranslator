@@ -106,10 +106,14 @@ async def translate(request: Request):
         if isinstance(val, str):
             return val
         if isinstance(val, (int, float, bool)):
-            logger.debug("Field '%s' is %s, converting to string", key, type(val).__name__)
+            logger.debug(
+                "Field '%s' is %s, converting to string", key, type(val).__name__
+            )
             return str(val)
         if val is not None:
-            logger.warning("Field '%s' has unexpected type %s: %r", key, type(val).__name__, val)
+            logger.warning(
+                "Field '%s' has unexpected type %s: %r", key, type(val).__name__, val
+            )
         return default
 
     q = _str("q")
@@ -120,9 +124,21 @@ async def translate(request: Request):
         logger.debug("Empty q='%s', returning empty translation", q.strip())
         return {"translatedText": ""}
     if not target.strip():
-        logger.warning("Bad request — q=%r source=%r target=%r raw keys=%s",
-                       q, source, target, list(raw.keys()) if hasattr(raw, 'keys') else type(raw).__name__)
+        logger.warning(
+            "Bad request — q=%r source=%r target=%r raw keys=%s",
+            q,
+            source,
+            target,
+            list(raw.keys()) if hasattr(raw, "keys") else type(raw).__name__,
+        )
         raise HTTPException(400, detail="target is required")
+
+    logger.info(
+        "Translation request: %d chars (source=%s target=%s)",
+        len(q.strip()),
+        source,
+        target,
+    )
 
     try:
         return await translator.translate(q.strip(), source, target.strip())

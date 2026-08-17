@@ -22,10 +22,11 @@ class QueueLogHandler(logging.Handler):
     def __init__(self, q: queue.Queue):
         super().__init__()
         self.q = q
-        self.setFormatter(logging.Formatter(
-            '%(asctime)s - %(levelname)s - %(message)s',
-            datefmt='%H:%M:%S'
-        ))
+        self.setFormatter(
+            logging.Formatter(
+                "%(asctime)s - %(levelname)s - %(message)s", datefmt="%H:%M:%S"
+            )
+        )
 
     def emit(self, record):
         try:
@@ -40,7 +41,7 @@ for h in root_logger.handlers[:]:
 root_logger.addHandler(QueueLogHandler(log_queue))
 root_logger.setLevel(logging.INFO)
 
-for name in ('httpx', 'httpcore'):
+for name in ("httpx", "httpcore"):
     logging.getLogger(name).setLevel(logging.WARNING)
 
 import config as cfg
@@ -68,7 +69,9 @@ class PresetSelectScreen(ModalScreen):
                     label += f"\n  [dim]{desc}[/dim]"
                 yield Button(label, id=f"p{key}", variant="primary")
             yield Button("Use default (env)", id="cancel", variant="default")
-            yield Label("[dim]Up/Down or Tab - navigate | Enter - select[/dim]", id="dlg-hint")
+            yield Label(
+                "[dim]Up/Down or Tab - navigate | Enter - select[/dim]", id="dlg-hint"
+            )
 
     def action_next_button(self):
         self.focus_next()
@@ -125,6 +128,7 @@ class ServerProcess:
         self.translator = LLMTranslator()
 
         import main as main_module
+
         main_module.translator = self.translator
 
         uvicorn_cfg = uvicorn.Config(
@@ -145,10 +149,9 @@ class ServerProcess:
 
         threading.Thread(target=_watcher, daemon=True).start()
 
-        event_queue.put({
-            "type": "status",
-            "text": f"Server started ({self._preset_name})"
-        })
+        event_queue.put(
+            {"type": "status", "text": f"Server started ({self._preset_name})"}
+        )
 
         self._server.run()
         self._server = None
@@ -299,8 +302,9 @@ class TranslatorTUI(App):
 
     def __init__(self):
         super().__init__()
-        self.msg_count = 0
-        self.err_count = 0
+        self.translations = 0
+        self.cached = 0
+        self.errors = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self._all_logs: list[str] = []
@@ -317,7 +321,9 @@ class TranslatorTUI(App):
                 yield StatusPanel(id="status")
                 yield Static("", id="stats-bar")
             with Vertical(id="main-panel"):
-                yield RichLog(id="log-widget", highlight=True, markup=True, max_lines=2000)
+                yield RichLog(
+                    id="log-widget", highlight=True, markup=True, max_lines=2000
+                )
         yield Footer()
 
     def on_mount(self):
@@ -366,6 +372,9 @@ class TranslatorTUI(App):
         if t:
             self.prompt_tokens = t.prompt_tokens
             self.completion_tokens = t.completion_tokens
+            self.translations = t.translations
+            self.cached = t.cached
+            self.errors = t.errors
 
     def _write_log(self, log: RichLog, msg: str):
         self._all_logs.append(msg)
@@ -376,15 +385,10 @@ class TranslatorTUI(App):
             log.write(f"[#ffaa33]{msg}[/#ffaa33]")
         elif "success" in ml:
             log.write(f"[bold #33aa33]{msg}[/bold #33aa33]")
-            if "translat" in ml or "символов" in ml:
-                self.msg_count += 1
         elif "post /translate" in ml or "get /translate" in ml:
             log.write(f"[bold #33aa33]{msg}[/bold #33aa33]")
-            self.msg_count += 1
         elif "cached" in ml:
             log.write(f"[#44bbdd]{msg}[/#44bbdd]")
-            if "using cached" in ml or "cache hit" in ml:
-                self.msg_count += 1
         elif "uvicorn running" in ml or "startup complete" in ml or "running on" in ml:
             log.write(f"[bold #44bbdd]{msg}[/bold #44bbdd]")
         elif "application startup" in ml or "started server process" in ml:
@@ -401,7 +405,6 @@ class TranslatorTUI(App):
         if t == "status":
             self._status_msg = text
         elif t == "error":
-            self.err_count += 1
             self._status_msg = f"Error: {text}"
             log = self.query_one("#log-widget", RichLog)
             if log:
@@ -449,8 +452,9 @@ class TranslatorTUI(App):
                 f"[bold]Chain:[/bold]        [#44bbdd]{chain_info}[/#44bbdd]\n"
                 f"[bold]Reasoning:[/bold]    [#ffaa33]{effort_str}[/#ffaa33]  [dim](F2)[/dim]\n"
                 f"[bold]Port:[/bold]         [#ffaa33]5555[/#ffaa33]\n"
-                f"[bold]Translations:[/bold] [#33aa33]{self.msg_count}[/#33aa33]\n"
-                f"[bold]Errors:[/bold]       [#cc3333]{self.err_count}[/#cc3333]\n"
+                f"[bold]Translations:[/bold] [#33aa33]{self.translations}[/#33aa33]  [dim](session)[/dim]\n"
+                f"[bold]Cached:[/bold]       [#44bbdd]{self.cached}[/#44bbdd]  [dim](from cache)[/dim]\n"
+                f"[bold]Errors:[/bold]       [#cc3333]{self.errors}[/#cc3333]  [dim](session)[/dim]\n"
                 f"[bold]Prompt tokens:[/bold] [#ffaa33]{self.prompt_tokens}[/#ffaa33]\n"
                 f"[bold]Output tokens:[/bold] [#44bbdd]{self.completion_tokens}[/#44bbdd]\n"
                 f"[bold]Uptime:[/bold]       {uptime}\n"
@@ -496,8 +500,6 @@ class TranslatorTUI(App):
 
     def action_restart_server(self):
         self._write_raw("[bold #ffaa33]>> Restarting server...[/bold #ffaa33]")
-        self.msg_count = 0
-        self.err_count = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self._all_logs.clear()
@@ -509,6 +511,7 @@ class TranslatorTUI(App):
         if t:
             return t.reasoning_effort.get(cfg.DEFAULT_PROVIDER)
         return None
+
     def _toggle_effort_direct(self, direction: str = "next"):
         try:
             t = server_proc.translator
@@ -517,9 +520,7 @@ class TranslatorTUI(App):
                 label = "off" if effort is None else effort
                 self._status_msg = f"Reasoning: {label}"
                 self._update_status()
-                self._write_raw(
-                    f"[bold #44bbdd]>> Reasoning: {label}[/bold #44bbdd]"
-                )
+                self._write_raw(f"[bold #44bbdd]>> Reasoning: {label}[/bold #44bbdd]")
             else:
                 self._write_raw("[dim]Server not running yet[/dim]")
         except Exception as e:

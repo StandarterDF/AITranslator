@@ -1,10 +1,14 @@
+import json
 import os
 import logging
+from pathlib import Path
 from dotenv import load_dotenv
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+REASONING_STATE_FILE = Path(__file__).parent / "reasoning_state.json"
 
 # "openai"  — OpenAI-compatible chat.completions (messages, reasoning_effort in extra_body)
 # "deepseek" — native DeepSeek API (top-level "thinking": {"reasoning_effort": ...})
@@ -17,7 +21,10 @@ PROVIDERS: dict[str, dict] = {
         "api_key": os.getenv("LOCALLLM_API_KEY", "sk-LocalHost"),
         "base_url": os.getenv("LOCALLLM_BASE_URL", "http://192.168.0.124:8080/v1"),
         "model": os.getenv("LOCALLLM_MODEL", "QwenCoder"),
-        "prefill": os.getenv("LOCALLLM_PREFILL", "<|channel|>thought\nМоя задача — перевести текст с английского на русский языки. Я выдаю ТОЛЬКО перевод, без пояснений и оригинального текста. Сохраняю всю пунктуацию. <|channel|>"),
+        "prefill": os.getenv(
+            "LOCALLLM_PREFILL",
+            "<|channel|>thought\nМоя задача — перевести текст с английского на русский языки. Я выдаю ТОЛЬКО перевод, без пояснений и оригинального текста. Сохраняю всю пунктуацию. <|channel|>",
+        ),
     },
     "deepseek": {
         "api_key": os.getenv("DEEPSEEK_API_KEY", ""),
@@ -33,13 +40,24 @@ DEFAULT_PROVIDER = "localllm"
 
 TRANSLATION_CHAIN: list[dict] = [
     {"type": "llm", "provider": "localllm", "multiplier": 8, "cap": 16384},
-    {"type": "llm", "provider": "localllm", "mode": "completions", "temperature": 0.3, "multiplier": 10, "cap": 32768},
+    {
+        "type": "llm",
+        "provider": "localllm",
+        "mode": "completions",
+        "temperature": 0.3,
+        "multiplier": 10,
+        "cap": 32768,
+    },
 ]
 
-LIBRETRANSLATE_URL = os.getenv("LIBRETRANSLATE_URL", "https://libretranslate.com/translate")
+LIBRETRANSLATE_URL = os.getenv(
+    "LIBRETRANSLATE_URL", "https://libretranslate.com/translate"
+)
 LIBRETRANSLATE_API_KEY = os.getenv("LIBRETRANSLATE_API_KEY", "")
 
-LOG_TRANSLATION_CONTENT = os.getenv("LOG_TRANSLATION_CONTENT", "false").lower() == "true"
+LOG_TRANSLATION_CONTENT = (
+    os.getenv("LOG_TRANSLATION_CONTENT", "false").lower() == "true"
+)
 
 PRESETS: dict[str, dict] = {
     "default": {
@@ -48,7 +66,14 @@ PRESETS: dict[str, dict] = {
         "default_provider": "localllm",
         "translation_chain": [
             {"type": "llm", "provider": "localllm", "multiplier": 8, "cap": 16384},
-            {"type": "llm", "provider": "localllm", "mode": "completions", "temperature": 0.3, "multiplier": 10, "cap": 32768},
+            {
+                "type": "llm",
+                "provider": "localllm",
+                "mode": "completions",
+                "temperature": 0.3,
+                "multiplier": 10,
+                "cap": 32768,
+            },
         ],
     },
     "deepseek": {
@@ -57,15 +82,44 @@ PRESETS: dict[str, dict] = {
         "default_provider": "deepseek",
         "translation_chain": [
             {"type": "llm", "provider": "deepseek", "max_tokens": None},
-            {"type": "google"}
+            {"type": "google"},
         ],
     },
 }
 
 
+def _load_reasoning_state() -> dict:
+    try:
+        data = json.loads(REASONING_STATE_FILE.read_text("utf-8"))
+        state = data.get("reasoning_effort", {}) if isinstance(data, dict) else {}
+        return {k: v for k, v in state.items() if isinstance(v, (str, type(None)))}
+    except (OSError, ValueError):
+        return {}
+
+
+def _save_reasoning_state(state: dict) -> None:
+    try:
+        REASONING_STATE_FILE.write_text(
+            json.dumps({"reasoning_effort": state}, ensure_ascii=False, indent=2),
+            "utf-8",
+        )
+    except OSError as e:
+        logger.warning("Failed to persist reasoning state: %s", e)
+
+
+_reasoning_state = _load_reasoning_state()
+for _provider, _effort in _reasoning_state.items():
+    if _provider in PROVIDERS:
+        PROVIDERS[_provider]["reasoning_effort"] = _effort
+
+
 def list_presets() -> list[dict]:
     return [
-        {"key": key, "name": p.get("name", key), "description": p.get("description", "")}
+        {
+            "key": key,
+            "name": p.get("name", key),
+            "description": p.get("description", ""),
+        }
         for key, p in PRESETS.items()
     ]
 
@@ -82,6 +136,9 @@ def set_reasoning_effort(provider: str, effort: str | None) -> None:
     if not cfg:
         raise ValueError(f"Unknown provider '{provider}'")
     cfg["reasoning_effort"] = effort
+    state = _load_reasoning_state()
+    state[provider] = effort
+    _save_reasoning_state(state)
 
 
 def load_preset(name: str) -> dict | None:
@@ -117,4 +174,8 @@ def apply_preset(preset: dict):
 
     if "log_translation_content" in preset:
         val = preset["log_translation_content"]
-        LOG_TRANSLATION_CONTENT = str(val).lower() in ("true", "1", "yes") if not isinstance(val, bool) else val
+        LOG_TRANSLATION_CONTENT = (
+            str(val).lower() in ("true", "1", "yes")
+            if not isinstance(val, bool)
+            else val
+        )

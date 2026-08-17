@@ -57,7 +57,9 @@ def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
 
-def estimate_max_output_tokens(text: str, multiplier: float = 5.0, cap: int = 16384) -> int:
+def estimate_max_output_tokens(
+    text: str, multiplier: float = 5.0, cap: int = 16384
+) -> int:
     input_tokens = estimate_tokens(text)
     return max(256, min(cap, int(input_tokens * multiplier)))
 
@@ -92,13 +94,17 @@ async def _translate_libretranslate(text: str, source: str, target: str) -> str:
         headers["Authorization"] = f"Bearer {config.LIBRETRANSLATE_API_KEY}"
 
     async with httpx.AsyncClient(timeout=TRANSLATION_TIMEOUT) as client:
-        resp = await client.post(config.LIBRETRANSLATE_URL, json=payload, headers=headers)
+        resp = await client.post(
+            config.LIBRETRANSLATE_URL, json=payload, headers=headers
+        )
         resp.raise_for_status()
         data = resp.json()
         if "error" in data:
             raise TranslationError(f"LibreTranslate error: {data['error']}")
         if "translatedText" not in data:
-            raise TranslationError(f"LibreTranslate unexpected response: {str(data)[:200]}")
+            raise TranslationError(
+                f"LibreTranslate unexpected response: {str(data)[:200]}"
+            )
         return data["translatedText"]
 
 
@@ -115,6 +121,9 @@ class LLMTranslator:
         self._validate_chain()
         self.prompt_tokens: int = 0
         self.completion_tokens: int = 0
+        self.translations: int = 0
+        self.cached: int = 0
+        self.errors: int = 0
         self.reasoning_effort: dict[str, str | None] = {
             p: config.get_reasoning_effort(p) for p in config.PROVIDERS
         }
@@ -192,6 +201,7 @@ class LLMTranslator:
 
         cached = cache_manager.get_cache(source_lang, target_lang, text)
         if cached is not None:
+            self.cached += 1
             logger.info("Using cached translation")
             cached = restore_urls(text, cached)
             return {"translatedText": cached}
@@ -218,7 +228,12 @@ class LLMTranslator:
                         text, source_lang, target_lang
                     )
                 else:
-                    logger.warning("[%d/%d] %s — unknown step type, skipped", step_num, total, label)
+                    logger.warning(
+                        "[%d/%d] %s — unknown step type, skipped",
+                        step_num,
+                        total,
+                        label,
+                    )
                     errors.append(f"step {step_num}: unknown type '{step_type}'")
                     continue
 
@@ -227,30 +242,56 @@ class LLMTranslator:
                 if result and result.strip():
                     clean = result.strip()
                     clean = restore_urls(text, clean)
-                    logger.info("[%d/%d] %s — SUCCESS (%.1fs)", step_num, total, label, elapsed)
+                    self.translations += 1
+                    logger.info(
+                        "[%d/%d] %s — SUCCESS (%.1fs)", step_num, total, label, elapsed
+                    )
                     if config.LOG_TRANSLATION_CONTENT:
                         logger.info("Content: %s", clean)
                     cache_manager.set_cache(source_lang, target_lang, text, clean)
                     return {"translatedText": clean}
 
-                logger.warning("[%d/%d] %s — empty result (%.1fs)", step_num, total, label, elapsed)
+                logger.warning(
+                    "[%d/%d] %s — empty result (%.1fs)", step_num, total, label, elapsed
+                )
                 errors.append(f"step {step_num}: empty result")
 
             except TranslationError as e:
                 elapsed = time.monotonic() - start
-                logger.warning("[%d/%d] %s — FAILED: %s (%.1fs)", step_num, total, label, e.message, elapsed)
+                logger.warning(
+                    "[%d/%d] %s — FAILED: %s (%.1fs)",
+                    step_num,
+                    total,
+                    label,
+                    e.message,
+                    elapsed,
+                )
                 errors.append(f"step {step_num}: {e.message}")
             except Exception as e:
                 elapsed = time.monotonic() - start
-                logger.warning("[%d/%d] %s — FAILED: %s (%.1fs)", step_num, total, label, e, elapsed)
+                logger.warning(
+                    "[%d/%d] %s — FAILED: %s (%.1fs)",
+                    step_num,
+                    total,
+                    label,
+                    e,
+                    elapsed,
+                )
                 errors.append(f"step {step_num}: {e}")
 
+        self.errors += 1
         raise TranslationError(
-            f"All {total} translation steps failed. Errors: {'; '.join(errors)}", 502,
+            f"All {total} translation steps failed. Errors: {'; '.join(errors)}",
+            502,
         )
 
     async def _translate_via_llm(
-        self, text: str, source: str, target: str, step: dict, provider_name: str,
+        self,
+        text: str,
+        source: str,
+        target: str,
+        step: dict,
+        provider_name: str,
     ) -> str:
         cfg = config.PROVIDERS[provider_name]
         client = self._get_client(provider_name)
@@ -258,7 +299,14 @@ class LLMTranslator:
 
         if step.get("mode") == "completions":
             return await self._translate_via_completions(
-                text, source, target, step, provider_name, client, model, cfg,
+                text,
+                source,
+                target,
+                step,
+                provider_name,
+                client,
+                model,
+                cfg,
             )
 
         parts = format_prompt(source, target, text)
@@ -289,7 +337,10 @@ class LLMTranslator:
             if reasoning_effort is None:
                 extra_body["thinking"] = {"type": "disabled"}
             else:
-                extra_body["thinking"] = {"type": "enabled", "reasoning_effort": reasoning_effort}
+                extra_body["thinking"] = {
+                    "type": "enabled",
+                    "reasoning_effort": reasoning_effort,
+                }
         else:
             if reasoning_effort is not None:
                 extra_body["reasoning_effort"] = reasoning_effort
@@ -302,15 +353,25 @@ class LLMTranslator:
             max_tokens = estimate_max_output_tokens(text, step_multiplier, step_cap)
 
         logger.debug("Input text (%d chars): %r", len(text), text[:1000])
-        logger.debug("Messages sent:\n%s",
-            "\n".join(f"  [{m['role']}] {m['content'][:200]}" for m in messages))
+        logger.debug(
+            "Messages sent:\n%s",
+            "\n".join(f"  [{m['role']}] {m['content'][:200]}" for m in messages),
+        )
         logger.debug(
             "LLM request: provider=%s model=%s api_type=%s max_tokens=%s temp=%.1f prefill=%s reasoning=%s input_chars=%d",
-            provider_name, model, api_type, str(max_tokens), temperature,
+            provider_name,
+            model,
+            api_type,
+            str(max_tokens),
+            temperature,
             "yes" if prefill_text else "no",
             (extra_body.get("thinking") or {}).get("reasoning_effort")
             or extra_body.get("reasoning_effort")
-            or ("off" if (extra_body.get("thinking") or {}).get("type") == "disabled" else "None"),
+            or (
+                "off"
+                if (extra_body.get("thinking") or {}).get("type") == "disabled"
+                else "None"
+            ),
             len(text),
         )
 
@@ -337,7 +398,9 @@ class LLMTranslator:
             self.prompt_tokens += usage.prompt_tokens
             self.completion_tokens += usage.completion_tokens
             logger.debug("Token usage: %s", usage)
-        logger.debug("Raw response: finish_reason=%s content=%r", finish_reason, content)
+        logger.debug(
+            "Raw response: finish_reason=%s content=%r", finish_reason, content
+        )
 
         if content is None:
             logger.warning("LLM returned empty (finish_reason=%s)", finish_reason)
@@ -346,7 +409,7 @@ class LLMTranslator:
             )
 
         if prefill_text and content.startswith(prefill_text):
-            content = content[len(prefill_text):]
+            content = content[len(prefill_text) :]
 
         content = content.strip()
         if "\n\nПеревод:" in content:
@@ -354,7 +417,8 @@ class LLMTranslator:
 
         if not validate_translation(content, target):
             logger.warning(
-                "Validation raw content (after strip): %r", content[:2000],
+                "Validation raw content (after strip): %r",
+                content[:2000],
             )
             raise TranslationError(
                 f"Output validation failed — not in target language ({target})",
@@ -363,8 +427,15 @@ class LLMTranslator:
         return content
 
     async def _translate_via_completions(
-        self, text: str, source: str, target: str, step: dict, provider_name: str,
-        client, model: str, cfg: dict,
+        self,
+        text: str,
+        source: str,
+        target: str,
+        step: dict,
+        provider_name: str,
+        client,
+        model: str,
+        cfg: dict,
     ) -> str:
         source_name = LANGUAGE_NAMES.get(source, source)
         target_name = LANGUAGE_NAMES.get(target, target)
@@ -387,7 +458,11 @@ class LLMTranslator:
         logger.debug("Completions prompt (%d chars): %r", len(prompt), prompt[:300])
         logger.debug(
             "LLM request: provider=%s model=%s max_tokens=%s temp=%.1f input_chars=%d",
-            provider_name, model, str(max_tokens), temperature, len(text),
+            provider_name,
+            model,
+            str(max_tokens),
+            temperature,
+            len(text),
         )
 
         if max_tokens is not None:
@@ -411,7 +486,9 @@ class LLMTranslator:
             self.prompt_tokens += usage.prompt_tokens
             self.completion_tokens += usage.completion_tokens
             logger.debug("Token usage: %s", usage)
-        logger.debug("Raw completions: finish_reason=%s content=%r", finish_reason, content)
+        logger.debug(
+            "Raw completions: finish_reason=%s content=%r", finish_reason, content
+        )
 
         if not content or not content.strip():
             raise TranslationError(
@@ -433,7 +510,8 @@ class LLMTranslator:
 
         if not validate_translation(content, target):
             logger.warning(
-                "Validation raw content (after strip): %r", content[:2000],
+                "Validation raw content (after strip): %r",
+                content[:2000],
             )
             raise TranslationError(
                 f"Output validation failed — not in target language ({target})",

@@ -15,6 +15,9 @@ cache/*.json
 # Environment — contains secrets
 .env
 
+# Runtime state (reasoning effort persists across restarts)
+reasoning_state.json
+
 # Bug tracker — personal notes, not code
 ISSUES.md
 
