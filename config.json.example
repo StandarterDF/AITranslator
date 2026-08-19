@@ -30,5 +30,6 @@
   ],
   "libretranslate_url": "https://libretranslate.com/translate",
   "libretranslate_api_key": "",
-  "log_translation_content": false
+  "log_translation_content": false,
+  "log_level": "INFO"
 }

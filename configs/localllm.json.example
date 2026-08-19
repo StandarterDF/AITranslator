@@ -19,5 +19,6 @@
       "multiplier": 10,
       "cap": 32768
     }
-  ]
+  ],
+  "log_level": "INFO"
 }

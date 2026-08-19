@@ -19,17 +19,17 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+import cache_manager
+import config
+from translator import LLMTranslator, TranslationError
+
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=getattr(logging, config.LOG_LEVEL, logging.INFO),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("httpcore").setLevel(logging.WARNING)
-
-import cache_manager
-import config
-from translator import LLMTranslator, TranslationError
 
 _provider = os.environ.get("TRANSLATOR_PROVIDER")
 

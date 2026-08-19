@@ -14,5 +14,6 @@
   "translation_chain": [
     {"type": "llm", "provider": "deepseek", "max_tokens": null},
     {"type": "google"}
-  ]
+  ],
+  "log_level": "INFO"
 }

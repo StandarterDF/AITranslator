@@ -52,7 +52,7 @@ validator.py     — script-based language validation (Cyrillic ratio ≥ 0.5)
 
 ## Logging
 
-`main.py:8-14` — root logger at `DEBUG`, httpx/httpcore throttled to `WARNING`. Content is logged at INFO only when `LOG_TRANSLATION_CONTENT = True` in config.
+Root logger level is set by `log_level` in `config.json` (default `INFO`). `DEBUG` enables verbose logs (full request bodies, httpcore connection details). `httpx`/`httpcore` are always throttled to `WARNING`. Content is logged at INFO only when `LOG_TRANSLATION_CONTENT = True` in config.
 
 ## Validation
 

@@ -13,5 +13,6 @@
   "default_provider": "deepseek",
   "translation_chain": [
     {"type": "llm", "provider": "deepseek", "max_tokens": null}
-  ]
+  ],
+  "log_level": "INFO"
 }

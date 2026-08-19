@@ -159,6 +159,18 @@ LOG_TRANSLATION_CONTENT: bool = _parse_log_translation_content(
     raw.get("log_translation_content", False)
 )
 
+
+def _parse_log_level(value) -> str:
+    """Parse log_level value. Returns uppercase string or 'INFO' on invalid input."""
+    valid = ("DEBUG", "INFO", "WARNING", "ERROR")
+    if isinstance(value, str) and value.upper() in valid:
+        return value.upper()
+    logger.warning("Невалидное значение log_level=%r, используется 'INFO'", value)
+    return "INFO"
+
+
+LOG_LEVEL: str = _parse_log_level(raw.get("log_level", "INFO"))
+
 logger.debug(
     "Loaded config from %s: providers=%s default=%s chain=%s",
     config_path,

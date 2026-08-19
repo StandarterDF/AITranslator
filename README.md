@@ -113,7 +113,8 @@ LIBRETRANSLATE_API_KEY=
   ],
   "libretranslate_url": "https://libretranslate.com/translate",
   "libretranslate_api_key": "",
-  "log_translation_content": false
+  "log_translation_content": false,
+  "log_level": "INFO"
 }
 ```
 
@@ -124,6 +125,8 @@ LIBRETRANSLATE_API_KEY=
 4. Empty config (with error)
 
 Ready-made minimal templates are in `configs/` (deepseek, localllm, deepseek+fallback). Copy the one you need to `config.json`.
+
+- `log_level` — уровень логирования корневого логгера: `DEBUG`, `INFO` (по умолчанию), `WARNING`, `ERROR`. `DEBUG` включает подробные логи (полные тела запросов openai-клиента, connection-детали httpcore).
 
 ### Reasoning effort
 
@@ -332,7 +335,8 @@ LIBRETRANSLATE_API_KEY=
   ],
   "libretranslate_url": "https://libretranslate.com/translate",
   "libretranslate_api_key": "",
-  "log_translation_content": false
+  "log_translation_content": false,
+  "log_level": "INFO"
 }
 ```
 
@@ -343,6 +347,8 @@ LIBRETRANSLATE_API_KEY=
 4. Пустая конфигурация (с ошибкой)
 
 Готовые минимальные шаблоны лежат в `configs/` (deepseek, localllm, deepseek+fallback). Скопируйте нужный в `config.json`.
+
+- `log_level` — уровень логирования корневого логгера: `DEBUG`, `INFO` (по умолчанию), `WARNING`, `ERROR`. `DEBUG` включает подробные логи (полные тела запросов openai-клиента, connection-детали httpcore).
 
 ### Режим мышления (reasoning effort)
 
