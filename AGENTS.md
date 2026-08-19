@@ -2,7 +2,8 @@
 
 ## Entrypoint & run
 
-- `python main.py` — starts FastAPI on `0.0.0.0:5555`
+- `python main.py` — starts FastAPI on `0.0.0.0:5555` (uvicorn `reload` is **off** by default)
+- `python main.py --reload` — starts FastAPI with uvicorn auto-reload enabled (development only)
 - `start.bat` — alias for `python main.py`
 - Single route: `POST /translate` — expects `q` (text), `source` (default `"auto"`), `target` (required)
 - Provider selection: `TRANSLATOR_PROVIDER` env var or `--provider <name>`

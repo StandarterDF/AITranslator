@@ -43,6 +43,9 @@ venv/bin/python main.py --provider localllm
 # Or set via environment variable
 TRANSLATOR_PROVIDER=localllm venv/bin/python main.py
 
+# Enable uvicorn auto-reload (development only; disabled by default)
+venv/bin/python main.py --reload
+
 # TUI (Textual terminal interface)
 venv/bin/python tui.py
 venv/bin/python tui.py --config configs/deepseek.json
@@ -258,6 +261,9 @@ venv/bin/python main.py --provider localllm
 
 # Или через переменную окружения
 TRANSLATOR_PROVIDER=localllm venv/bin/python main.py
+
+# Включить автоперезагрузку uvicorn (только для разработки; по умолчанию выключена)
+venv/bin/python main.py --reload
 
 # TUI (терминальный интерфейс на Textual)
 venv/bin/python tui.py

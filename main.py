@@ -6,6 +6,9 @@ for _i, _arg in enumerate(sys.argv):
     if _arg == "--config" and _i + 1 < len(sys.argv):
         os.environ["TRANSLATOR_CONFIG"] = sys.argv[_i + 1]
 
+# Parse --reload flag (boolean, no value)
+_reload = "--reload" in sys.argv
+
 from contextlib import asynccontextmanager
 from typing import Any
 from fastapi import FastAPI, HTTPException, Request
@@ -145,4 +148,4 @@ if os.path.isdir(static_dir):
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=5555, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=5555, reload=_reload)
