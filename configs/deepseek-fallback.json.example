@@ -2,7 +2,7 @@
   "_comment": "DeepSeek + Google/LibreTranslate fallback. Скопируй в config.json в корне проекта.",
   "providers": {
     "deepseek": {
-      "api_key": "",
+      "api_key": "DEEPSEEK_API_KEY",
       "base_url": "https://api.deepseek.com/v1",
       "model": "deepseek-v4-flash",
       "prefill": "",

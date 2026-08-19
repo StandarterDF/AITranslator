@@ -24,145 +24,153 @@ def _parse_reasoning_effort(value: str | None) -> str | None:
     return value
 
 
-PROVIDERS: dict[str, dict] = {
-    "localllm": {
-        "api_key": os.getenv("LOCALLLM_API_KEY", "sk-LocalHost"),
-        "base_url": os.getenv("LOCALLLM_BASE_URL", "http://192.168.0.124:8080/v1"),
-        "model": os.getenv("LOCALLLM_MODEL", "QwenCoder"),
-        "prefill": os.getenv(
-            "LOCALLLM_PREFILL",
-            "<|channel|>thought\nМоя задача — перевести текст с английского на русский языки. Я выдаю ТОЛЬКО перевод, без пояснений и оригинального текста. Сохраняю всю пунктуацию. <|channel|>",
-        ),
-    },
-    "deepseek": {
-        "api_key": os.getenv("DEEPSEEK_API_KEY", ""),
-        "base_url": os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com/v1"),
-        "model": os.getenv("DEEPSEEK_MODEL", "deepseek-v4-flash"),
-        "prefill": os.getenv("DEEPSEEK_PREFILL", ""),
-        "api_type": os.getenv("DEEPSEEK_API_TYPE", "openai"),
-        "reasoning_effort": _parse_reasoning_effort(
-            os.getenv("DEEPSEEK_REASONING_EFFORT", "off")
-        ),
-    },
-}
-
-DEFAULT_PROVIDER = "localllm"
-
-TRANSLATION_CHAIN: list[dict] = [
-    {"type": "llm", "provider": "localllm", "multiplier": 8, "cap": 16384},
-    {
-        "type": "llm",
-        "provider": "localllm",
-        "mode": "completions",
-        "temperature": 0.3,
-        "multiplier": 10,
-        "cap": 32768,
-    },
-]
-
-LIBRETRANSLATE_URL = os.getenv(
-    "LIBRETRANSLATE_URL", "https://libretranslate.com/translate"
-)
-LIBRETRANSLATE_API_KEY = os.getenv("LIBRETRANSLATE_API_KEY", "")
-
-LOG_TRANSLATION_CONTENT = (
-    os.getenv("LOG_TRANSLATION_CONTENT", "false").lower() == "true"
-)
-
-PRESETS: dict[str, dict] = {
-    "default": {
-        "name": "Default (Local LLM)",
-        "description": "Local Qwen model via chat then completions fallback",
-        "default_provider": "localllm",
-        "translation_chain": [
-            {"type": "llm", "provider": "localllm", "multiplier": 8, "cap": 16384},
-            {
-                "type": "llm",
-                "provider": "localllm",
-                "mode": "completions",
-                "temperature": 0.3,
-                "multiplier": 10,
-                "cap": 32768,
-            },
-        ],
-    },
-    "deepseek": {
-        "name": "DeepSeek",
-        "description": "DeepSeek API for translation with Google/LibreTranslate fallback",
-        "default_provider": "deepseek",
-        "translation_chain": [
-            {"type": "llm", "provider": "deepseek", "max_tokens": None},
-            {"type": "google"},
-        ],
-    },
-}
-
-_LOCAL_CONFIG_FILE = Path(__file__).parent / "config.json"
-
-
-def _apply_config_overrides(preset: dict) -> None:
-    """Apply a config dict (from preset or config.json) onto module globals.
-    Used by both apply_preset() and _load_local_config().
+def _resolve_api_key(value: str) -> str:
+    """Resolve api_key: if value is a non-empty string that exists as an env var,
+    substitute os.environ[value]; otherwise keep the literal (e.g. 'sk-LocalHost').
     """
-    global PROVIDERS, DEFAULT_PROVIDER, TRANSLATION_CHAIN
-    global LIBRETRANSLATE_URL, LIBRETRANSLATE_API_KEY, LOG_TRANSLATION_CONTENT
+    if value and value in os.environ:
+        logger.debug("Resolved api_key '%s' -> env var value", value)
+        return os.environ[value]
+    return value
 
-    if "providers" in preset:
-        for name, cfg in preset["providers"].items():
-            if name in PROVIDERS:
-                PROVIDERS[name].update(cfg)
-            else:
-                PROVIDERS[name] = cfg
-        logger.debug("Applied %d providers from config", len(preset["providers"]))
 
-    if "default_provider" in preset:
-        DEFAULT_PROVIDER = preset["default_provider"]
+def _parse_log_translation_content(val) -> bool:
+    if isinstance(val, bool):
+        return val
+    if isinstance(val, str):
+        return val.lower() in ("true", "1", "yes")
+    return False
 
-    if "translation_chain" in preset:
-        TRANSLATION_CHAIN = preset["translation_chain"]
 
-    if "libretranslate_url" in preset:
-        LIBRETRANSLATE_URL = preset["libretranslate_url"]
+# ---------------------------------------------------------------------------
+# Config file resolution
+# ---------------------------------------------------------------------------
 
-    if "libretranslate_api_key" in preset:
-        LIBRETRANSLATE_API_KEY = preset["libretranslate_api_key"]
 
-    if "log_translation_content" in preset:
-        val = preset["log_translation_content"]
-        LOG_TRANSLATION_CONTENT = (
-            str(val).lower() in ("true", "1", "yes")
-            if not isinstance(val, bool)
-            else val
+def _resolve_config_path() -> Path | None:
+    """Resolve config file path:
+    1. TRANSLATOR_CONFIG env var (absolute or relative to project root)
+    2. config.json in project root
+    3. config.json.example fallback with warning
+    Returns None if nothing found.
+    """
+    env_path = os.environ.get("TRANSLATOR_CONFIG")
+    if env_path:
+        p = Path(env_path)
+        if not p.is_absolute():
+            p = Path(__file__).parent / p
+        if p.exists():
+            return p
+        logger.error("Config file from TRANSLATOR_CONFIG not found: %s", p)
+        return None
+
+    root_config = Path(__file__).parent / "config.json"
+    if root_config.exists():
+        return root_config
+
+    example = Path(__file__).parent / "config.json.example"
+    if example.exists():
+        logger.warning(
+            "config.json не найден, использую шаблон %s — скопируй его в config.json",
+            example,
         )
+        return example
+
+    logger.error(
+        "Не найден ни config.json, ни config.json.example. "
+        "Создай config.json (или скопируй config.json.example)."
+    )
+    return None
 
 
-def _load_local_config() -> None:
-    """Load user-local config.json (gitignored) and merge into module globals.
-    Priority: config.json overrides env-based defaults.
-    reasoning_state.json still overrides reasoning_effort afterwards.
-    """
-    if not _LOCAL_CONFIG_FILE.exists():
-        return
+# ---------------------------------------------------------------------------
+# Load and apply config
+# ---------------------------------------------------------------------------
 
+config_path = _resolve_config_path()
+
+if config_path is not None:
     try:
-        raw = json.loads(_LOCAL_CONFIG_FILE.read_text("utf-8"))
+        raw = json.loads(config_path.read_text("utf-8"))
     except (OSError, ValueError) as e:
-        logger.warning(
-            "Failed to parse %s: %s — keeping defaults", _LOCAL_CONFIG_FILE, e
-        )
-        return
+        logger.warning("Failed to parse %s: %s", config_path, e)
+        if config_path.name == "config.json":
+            example = Path(__file__).parent / "config.json.example"
+            if example.exists():
+                logger.warning("Falling back to %s", example)
+                config_path = example
+                try:
+                    raw = json.loads(config_path.read_text("utf-8"))
+                except (OSError, ValueError) as e2:
+                    logger.error("Fallback also failed: %s", e2)
+                    raw = {}
+            else:
+                raw = {}
+        else:
+            raw = {}
+    else:
+        if not isinstance(raw, dict):
+            logger.warning(
+                "%s root is not a JSON object — using empty config", config_path
+            )
+            raw = {}
+else:
+    raw = {}
 
-    if not isinstance(raw, dict):
-        logger.warning(
-            "%s root is not a JSON object — keeping defaults", _LOCAL_CONFIG_FILE
-        )
-        return
+# --- Apply to module globals ---
 
-    _apply_config_overrides(raw)
-    logger.debug("Loaded local config from %s", _LOCAL_CONFIG_FILE)
+PROVIDERS: dict[str, dict] = {}
+if "providers" in raw and isinstance(raw["providers"], dict):
+    for name, cfg in raw["providers"].items():
+        if not isinstance(cfg, dict):
+            continue
+        provider_cfg = {}
+        for key, val in cfg.items():
+            if key == "api_key":
+                provider_cfg["api_key"] = (
+                    _resolve_api_key(val) if isinstance(val, str) else val
+                )
+            elif key == "reasoning_effort":
+                provider_cfg["reasoning_effort"] = (
+                    _parse_reasoning_effort(val) if isinstance(val, str) else val
+                )
+            else:
+                provider_cfg[key] = val
+        PROVIDERS[name] = provider_cfg
+
+# DEFAULT_PROVIDER: from json, or None if absent
+DEFAULT_PROVIDER: str | None = (
+    raw.get("default_provider") if "default_provider" in raw else None
+)
+
+# TRANSLATION_CHAIN: from json, default []
+TRANSLATION_CHAIN: list[dict] = (
+    raw.get("translation_chain", []) if "translation_chain" in raw else []
+)
+
+# LibreTranslate
+LIBRETRANSLATE_URL: str = raw.get(
+    "libretranslate_url", "https://libretranslate.com/translate"
+)
+LIBRETRANSLATE_API_KEY: str = raw.get("libretranslate_api_key", "")
+
+# Logging toggle
+LOG_TRANSLATION_CONTENT: bool = _parse_log_translation_content(
+    raw.get("log_translation_content", False)
+)
+
+logger.debug(
+    "Loaded config from %s: providers=%s default=%s chain=%s",
+    config_path,
+    list(PROVIDERS.keys()),
+    DEFAULT_PROVIDER,
+    len(TRANSLATION_CHAIN),
+)
 
 
-_load_local_config()
+# ---------------------------------------------------------------------------
+# Reasoning state (runtime F2 override)
+# ---------------------------------------------------------------------------
 
 
 def _load_reasoning_state() -> dict:
@@ -190,17 +198,6 @@ for _provider, _effort in _reasoning_state.items():
         PROVIDERS[_provider]["reasoning_effort"] = _effort
 
 
-def list_presets() -> list[dict]:
-    return [
-        {
-            "key": key,
-            "name": p.get("name", key),
-            "description": p.get("description", ""),
-        }
-        for key, p in PRESETS.items()
-    ]
-
-
 def get_reasoning_effort(provider: str) -> str | None:
     cfg = PROVIDERS.get(provider)
     if not cfg:
@@ -216,16 +213,3 @@ def set_reasoning_effort(provider: str, effort: str | None) -> None:
     state = _load_reasoning_state()
     state[provider] = effort
     _save_reasoning_state(state)
-
-
-def load_preset(name: str) -> dict | None:
-    if name not in PRESETS:
-        logger.error("Preset '%s' not found. Available: %s", name, list(PRESETS.keys()))
-        return None
-    return dict(PRESETS[name])
-
-
-def apply_preset(preset: dict) -> None:
-    """Apply a preset dict onto module globals."""
-    _apply_config_overrides(preset)
-    logger.debug("Applied preset '%s'", preset.get("name", "<unnamed>"))

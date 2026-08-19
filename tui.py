@@ -13,6 +13,11 @@ ROOT = Path(__file__).parent
 os.chdir(str(ROOT))
 sys.path.insert(0, str(ROOT))
 
+# Parse --config BEFORE importing config, so the config module sees TRANSLATOR_CONFIG.
+for _i, _arg in enumerate(sys.argv):
+    if _arg == "--config" and _i + 1 < len(sys.argv):
+        os.environ["TRANSLATOR_CONFIG"] = sys.argv[_i + 1]
+
 log_queue: queue.Queue = queue.Queue()
 event_queue: queue.Queue = queue.Queue()
 stop_flag = threading.Event()
@@ -53,62 +58,47 @@ from textual.screen import ModalScreen
 from textual.binding import Binding
 
 
-class PresetSelectScreen(ModalScreen):
+class ReasoningScreen(ModalScreen):
+    """Simple screen showing current reasoning effort for each provider."""
+
     BINDINGS = [
-        Binding("up", "prev_button", "", show=False),
-        Binding("down", "next_button", "", show=False),
+        Binding("escape", "dismiss_none", "", show=False),
     ]
 
     def compose(self):
         with Vertical(id="dialog"):
-            yield Label("Select translation preset:", id="dlg-title")
-            for key, p in cfg.PRESETS.items():
-                label = f"  {p.get('name', key)}  "
-                desc = p.get("description", "")
-                if desc:
-                    label += f"\n  [dim]{desc}[/dim]"
-                yield Button(label, id=f"p{key}", variant="primary")
-            yield Button("Use default (env)", id="cancel", variant="default")
-            yield Label(
-                "[dim]Up/Down or Tab - navigate | Enter - select[/dim]", id="dlg-hint"
-            )
+            yield Label("[bold #ff8800]Reasoning effort[/bold #ff8800]", id="dlg-title")
+            for pname, cfg_data in cfg.PROVIDERS.items():
+                effort = cfg_data.get("reasoning_effort")
+                label = f"  {pname}: {effort if effort else 'off'}"
+                yield Label(label, id=f"r{pname}")
+            yield Label("[dim]Escape - close[/dim]", id="dlg-hint")
 
-    def action_next_button(self):
-        self.focus_next()
-
-    def action_prev_button(self):
-        self.focus_previous()
-
-    def on_button_pressed(self, event):
-        if event.button.id == "cancel":
-            self.dismiss(None)
-        elif event.button.id.startswith("p"):
-            self.dismiss(event.button.id[1:])
+    def action_dismiss_none(self):
+        self.dismiss(None)
 
 
 class ServerProcess:
     def __init__(self):
         self._thread: threading.Thread | None = None
         self._server: Any = None
-        self._preset_key: str | None = None
-        self._preset_name: str = "default"
+        self._config_label: str = "default"
         self.translator: Any = None
 
     @property
     def is_alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive()
 
-    def _resolve_name(self, key: str | None) -> str:
-        if not key:
-            return "default"
-        p = cfg.PRESETS.get(key)
-        return p.get("name", key) if p else key
+    def _resolve_label(self) -> str:
+        cfg_path = os.environ.get("TRANSLATOR_CONFIG", "config.json")
+        if cfg_path == "config.json" and not Path(cfg_path).exists():
+            return "default (config.json.example)"
+        return cfg_path
 
-    def start(self, preset_key: str | None = None):
+    def start(self):
         if self.is_alive:
             return
-        self._preset_key = preset_key
-        self._preset_name = self._resolve_name(preset_key)
+        self._config_label = self._resolve_label()
         stop_flag.clear()
         self._thread = threading.Thread(target=self._run, daemon=True)
         self._thread.start()
@@ -116,14 +106,6 @@ class ServerProcess:
     def _run(self):
         import uvicorn
         from translator import LLMTranslator
-
-        if self._preset_key:
-            os.environ["TRANSLATOR_PRESET"] = self._preset_key
-            p = cfg.load_preset(self._preset_key)
-            if p:
-                cfg.apply_preset(p)
-        else:
-            os.environ.pop("TRANSLATOR_PRESET", None)
 
         self.translator = LLMTranslator()
 
@@ -150,7 +132,7 @@ class ServerProcess:
         threading.Thread(target=_watcher, daemon=True).start()
 
         event_queue.put(
-            {"type": "status", "text": f"Server started ({self._preset_name})"}
+            {"type": "status", "text": f"Server started ({self._config_label})"}
         )
 
         self._server.run()
@@ -163,10 +145,10 @@ class ServerProcess:
         self._thread = None
         self._server = None
 
-    def restart(self, preset_key: str | None = None):
+    def restart(self):
         event_queue.put({"type": "status", "text": "Restarting server..."})
         self.stop()
-        self.start(preset_key or self._preset_key)
+        self.start()
 
 
 server_proc = ServerProcess()
@@ -245,20 +227,9 @@ class TranslatorTUI(App):
         color: #666;
     }
 
-    #dialog Button {
+    #dialog Label {
         margin: 1 0;
-        width: 100%;
-    }
-
-    Button {
-        background: #222;
-        color: #d4d4d4;
-        border: solid #444;
-        text-align: center;
-    }
-
-    PresetSelectScreen {
-        align: center middle;
+        padding: 0 1;
     }
 
     Header {
@@ -293,7 +264,6 @@ class TranslatorTUI(App):
 
     BINDINGS = [
         Binding("ctrl+c", "quit", "Quit"),
-        Binding("f1", "select_preset", "Preset"),
         Binding("f2", "toggle_reasoning", "Reasoning"),
         Binding("f5", "clear_log", "Clear log"),
         Binding("f3", "restart_server", "Restart"),
@@ -309,8 +279,6 @@ class TranslatorTUI(App):
         self.completion_tokens = 0
         self._all_logs: list[str] = []
         self.start_time = datetime.now()
-        self._current_preset_key: str | None = None
-        self._current_preset_name: str = "default"
         self._server_started = False
         self._status_msg = "Waiting..."
 
@@ -327,23 +295,7 @@ class TranslatorTUI(App):
         yield Footer()
 
     def on_mount(self):
-        self.push_screen(PresetSelectScreen(), self._on_preset_selected)
-
-    def _on_preset_selected(self, key: str | None):
-        if key:
-            self._current_preset_key = key
-            p = cfg.PRESETS.get(key, {})
-            self._current_preset_name = p.get("name", key)
-            label = p.get("name", key)
-            desc = p.get("description", "")
-            self._write_raw(f"[bold #ff8800]>> Selected: {label}[/bold #ff8800]")
-            if desc:
-                self._write_raw(f"[dim]   {desc}[/dim]")
-        else:
-            self._write_raw("[dim]Using default preset[/dim]")
-
-        self.start_time = datetime.now()
-        server_proc.start(self._current_preset_key)
+        server_proc.start()
         self._server_started = True
         self.set_interval(0.05, self._poll_queues)
         self.set_interval(1.0, self._periodic_update)
@@ -424,7 +376,6 @@ class TranslatorTUI(App):
         else:
             icon = STATUS_WAIT
 
-        preset_name = self._current_preset_name or "default"
         effort = self._current_effort()
         effort_str = str(effort) if effort is not None else "off"
         chain_info = ""
@@ -443,12 +394,14 @@ class TranslatorTUI(App):
         except Exception:
             chain_info = "unknown"
 
+        cfg_label = server_proc._config_label
+
         status_w = self.query_one("#status", StatusPanel)
         if status_w:
             status_w.update(
                 "[bold #ff8800]>>> STATUS <<<[/bold #ff8800]\n"
                 "──────────────────────────\n"
-                f"[bold]Preset:[/bold]       [#44bbdd]{preset_name}[/#44bbdd]\n"
+                f"[bold]Config:[/bold]     [#44bbdd]{cfg_label}[/#44bbdd]\n"
                 f"[bold]Chain:[/bold]        [#44bbdd]{chain_info}[/#44bbdd]\n"
                 f"[bold]Reasoning:[/bold]    [#ffaa33]{effort_str}[/#ffaa33]  [dim](F2)[/dim]\n"
                 f"[bold]Port:[/bold]         [#ffaa33]5555[/#ffaa33]\n"
@@ -485,26 +438,13 @@ class TranslatorTUI(App):
         except Exception as e:
             self._write_raw(f"[#cc3333]Copy failed: {e}[/#cc3333]")
 
-    def action_select_preset(self):
-        def callback(key: str | None):
-            if key:
-                self._current_preset_key = key
-                p = cfg.PRESETS.get(key, {})
-                self._current_preset_name = p.get("name", key)
-                label = p.get("name", key)
-                self._write_raw(f"[bold #ff8800]>> Selected: {label}[/bold #ff8800]")
-                self._write_raw("[dim]  Press F3 to apply[/dim]")
-                self._update_status()
-
-        self.push_screen(PresetSelectScreen(), callback)
-
     def action_restart_server(self):
         self._write_raw("[bold #ffaa33]>> Restarting server...[/bold #ffaa33]")
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self._all_logs.clear()
         self.start_time = datetime.now()
-        server_proc.restart(self._current_preset_key)
+        server_proc.restart()
 
     def _current_effort(self) -> str | None:
         t = server_proc.translator

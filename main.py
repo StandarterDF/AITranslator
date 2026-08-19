@@ -1,5 +1,11 @@
 import os
 import sys
+
+# Parse --config BEFORE importing config, so the config module sees TRANSLATOR_CONFIG.
+for _i, _arg in enumerate(sys.argv):
+    if _arg == "--config" and _i + 1 < len(sys.argv):
+        os.environ["TRANSLATOR_CONFIG"] = sys.argv[_i + 1]
+
 from contextlib import asynccontextmanager
 from typing import Any
 from fastapi import FastAPI, HTTPException, Request
@@ -23,49 +29,10 @@ import config
 from translator import LLMTranslator, TranslationError
 
 _provider = os.environ.get("TRANSLATOR_PROVIDER")
-_preset_name: str | None = os.environ.get("TRANSLATOR_PRESET")
 
 for i, arg in enumerate(sys.argv):
     if arg == "--provider" and i + 1 < len(sys.argv):
         _provider = sys.argv[i + 1]
-    if arg == "--preset" and i + 1 < len(sys.argv):
-        _preset_name = sys.argv[i + 1]
-
-
-def _choose_preset_interactive() -> str:
-    presets = config.list_presets()
-    if not presets:
-        return "default"
-
-    print("\nAvailable presets:")
-    for i, p in enumerate(presets, 1):
-        desc = p["description"]
-        print(f"  {i}. {p['name']}" + (f" — {desc}" if desc else ""))
-
-    while True:
-        try:
-            choice = input(f"\nSelect preset [1-{len(presets)}] (default 1): ").strip()
-            if not choice:
-                choice = "1"
-            idx = int(choice) - 1
-            if 0 <= idx < len(presets):
-                print(f"Selected: {presets[idx]['name']}\n")
-                return presets[idx]["key"]
-            print(f"Please enter a number between 1 and {len(presets)}")
-        except (ValueError, EOFError, KeyboardInterrupt):
-            print()
-            return presets[0]["key"] if presets else "default"
-
-
-if _preset_name is not None:
-    loaded = config.load_preset(_preset_name)
-    if loaded is None:
-        print(f"Error: preset '{_preset_name}' not found")
-        sys.exit(1)
-    config.apply_preset(loaded)
-    logger.info("Loaded preset: %s", loaded.get("name", _preset_name))
-else:
-    logger.info("No preset specified, using defaults from config.py")
 
 try:
     translator = LLMTranslator(_provider)
@@ -177,11 +144,5 @@ if os.path.isdir(static_dir):
 
 if __name__ == "__main__":
     import uvicorn
-
-    if _preset_name is None and "--preset" not in sys.argv:
-        _preset_name = _choose_preset_interactive()
-
-    if _preset_name is not None:
-        os.environ["TRANSLATOR_PRESET"] = _preset_name
 
     uvicorn.run("main:app", host="0.0.0.0", port=5555, reload=True)

@@ -2,7 +2,7 @@
   "_comment": "Только локальная LLM. Скопируй в config.json в корне проекта.",
   "providers": {
     "localllm": {
-      "api_key": "sk-LocalHost",
+      "api_key": "LOCALLLM_API_KEY",
       "base_url": "http://192.168.0.124:8080/v1",
       "model": "QwenCoder",
       "prefill": "<|channel|>thought\nМоя задача — перевести текст с английского на русский языки. Я выдаю ТОЛЬКО перевод, без пояснений и оригинального текста. Сохраняю всю пунктуацию. <|channel|>"

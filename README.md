@@ -30,14 +30,12 @@ Server starts at **http://0.0.0.0:5555**.
 
 ## 💻 CLI (direct start)
 
-> ⚠️ `start.bat` / `start.sh` are interactive (mode selection + preset selection) and may hang in non-interactive consoles. Use the direct commands below for reliable startup.
-
 ```bash
-# Server with default preset (no interactive prompts)
-venv/bin/python main.py --preset default
+# Server using config.json in project root (or config.json.example fallback)
+venv/bin/python main.py
 
-# Server with another preset
-venv/bin/python main.py --preset deepseek
+# Server with a specific config file
+venv/bin/python main.py --config configs/deepseek.json
 
 # Choose a provider
 venv/bin/python main.py --provider localllm
@@ -47,9 +45,10 @@ TRANSLATOR_PROVIDER=localllm venv/bin/python main.py
 
 # TUI (Textual terminal interface)
 venv/bin/python tui.py
+venv/bin/python tui.py --config configs/deepseek.json
 ```
 
-On Windows with venv: `venv\Scripts\python main.py --preset default`.
+On Windows with venv: `venv\Scripts\python main.py`.
 
 ## 📦 Usage
 
@@ -67,37 +66,71 @@ curl -X POST http://localhost:5555/translate \
 | `static/index.html` | Web UI — Google Translate-style translation interface |
 | `tui.py` | TUI — Textual-based terminal translation interface |
 | `translator.py` | `LLMTranslator` — fallback chain execution |
-| `config.py` | Providers, chain definition, presets |
+| `config.py` | Config loader (.env keys + config.json parsing) |
 | `prompt_template.py` | Dynamic system/user prompt templates (any language pair) |
 | `validator.py` | Script-based language validation (≥50% target script) |
 | `cache_manager.py` | SHA256 JSON cache in `cache/` directory |
 
 ## ⚙️ Configuration
 
-Set via `.env` or environment variables:
+### .env — API keys only
 
-| Variable | Default | Description |
-|---|---|---|
-| `LOCALLLM_API_KEY` | `sk-LocalHost` | API key for local LLM |
-| `LOCALLLM_BASE_URL` | `http://192.168.0.124:8080/v1` | OpenAI-compatible endpoint |
-| `LOCALLLM_MODEL` | `QwenCoder` | Model name |
-| `DEEPSEEK_API_KEY` | — | DeepSeek API key |
-| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | DeepSeek endpoint |
-| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek model |
-| `DEEPSEEK_API_TYPE` | `openai` | `openai` = OpenAI-compatible chat.completions; `deepseek` = native API (top-level `thinking` object) |
-| `DEEPSEEK_REASONING_EFFORT` | `off` | `low` \| `high` \| `max` — reasoning effort (`off` to disable; TUI F2 toggles at runtime) |
-| `LIBRETRANSLATE_URL` | `https://libretranslate.com/translate` | LibreTranslate endpoint |
-| `LOG_TRANSLATION_CONTENT` | `false` | Log translated text |
+`.env` (gitignored, copy from `.env.example`) holds **only API keys**. Variable names can be arbitrary — each name is referenced by the `api_key` field in `config.json`.
 
-Provider selection: `venv/bin/python main.py --provider localllm` or `TRANSLATOR_PROVIDER=localllm`.
+```
+LOCALLLM_API_KEY=sk-LocalHost
+DEEPSEEK_API_KEY=sk-your-deepseek-key-here
+LIBRETRANSLATE_API_KEY=
+```
 
-Preset selection: `venv/bin/python main.py --preset deepseek`. Interactive choice on startup if none given.
+### config.json — launch configuration
 
-> 💡 Ready-made minimal templates are in `configs/` (deepseek, localllm, deepseek+fallback). Copy the one you need to `config.json` in the project root.
+`config.json` (gitignored, copy from `config.json.example`) defines providers, chain, and runtime settings.
+
+**Key resolution for `api_key`:**
+- If the value is a non-empty string that exists as an env var → the env var's value is used.
+- If the env var is not set → the value is kept as a literal (useful for local servers, e.g. `"sk-LocalHost"`).
+
+**Structure:**
+```json
+{
+  "providers": {
+    "deepseek": {
+      "api_key": "DEEPSEEK_API_KEY",
+      "base_url": "https://api.deepseek.com/v1",
+      "model": "deepseek-v4-flash",
+      "prefill": "",
+      "api_type": "openai",
+      "reasoning_effort": null
+    }
+  },
+  "default_provider": "deepseek",
+  "translation_chain": [
+    {"type": "llm", "provider": "deepseek", "max_tokens": null}
+  ],
+  "libretranslate_url": "https://libretranslate.com/translate",
+  "libretranslate_api_key": "",
+  "log_translation_content": false
+}
+```
+
+**Config file resolution priority:**
+1. `TRANSLATOR_CONFIG` env var (absolute or relative to project root)
+2. `config.json` in project root
+3. `config.json.example` fallback (with warning)
+4. Empty config (with error)
+
+Ready-made minimal templates are in `configs/` (deepseek, localllm, deepseek+fallback). Copy the one you need to `config.json`.
+
+### Reasoning effort
+
+Provider default from `config.json` (`reasoning_effort` field). Runtime override via TUI `F2` cycles `low` → `high` → `max` → `off`. `off` (None) disables thinking.
+
+Priority: `reasoning_state.json` > `config.json` (or `--config`) > `config.json.example` > empty.
 
 ## 🔗 Fallback chain
 
-Defined in `config.py` as `TRANSLATION_CHAIN`. Each step is tried in order:
+Defined in `config.json` as `translation_chain`. Each step is tried in order:
 
 - ✅ **Success** → result cached and returned
 - ❌ **Failure** → next step runs
@@ -107,12 +140,10 @@ Defined in `config.py` as `TRANSLATION_CHAIN`. Each step is tried in order:
 - 💬 **chat** (default): `chat.completions.create()` with system/user/assistant messages
 - ⚡ **completions**: `completions.create()` with raw `<|channel|>`-token prompt (no prefill)
 
-**API types per provider** (`api_type` in `PROVIDERS`):
+**API types per provider** (`api_type` in `providers`):
 
 - 🔵 `openai` (default): OpenAI-compatible `chat.completions`, reasoning effort sent as `extra_body["reasoning_effort"]`
 - 🔴 `deepseek`: native DeepSeek API, reasoning effort sent as top-level `"thinking": {"reasoning_effort": ...}`
-
-Reasoning effort (`low`/`high`/`max`, or `off` to disable) defaults to `DEEPSEEK_REASONING_EFFORT` and is toggleable at runtime in the TUI with `F2`.
 
 **Non-LLM fallbacks:** `google` (free API), `libretranslate`.
 
@@ -141,7 +172,7 @@ Terminal-based translation interface (Textual) — a full-featured TUI for quick
   - `Ctrl+T` — swap source/target languages
   - `Ctrl+C` — copy translation result
   - `Ctrl+Q` — quit
-- TUI automatically starts the FastAPI server as a subprocess if not already running, or connects to an existing instance on `localhost:5555`
+- TUI automatically starts the FastAPI server as a subprocess if not already running
 - Serves as a standalone alternative to the Web UI — useful for server administration or headless environments
 
 | TUI main screen |
@@ -215,14 +246,12 @@ chmod +x install.sh start.sh
 
 ## 💻 CLI (прямой запуск)
 
-> ⚠️ `start.bat` / `start.sh` интерактивны (выбор режима + выбор пресета) и могут зависать в неинтерактивной консоли. Для надёжного запуска используйте прямые команды ниже.
-
 ```bash
-# Сервер с пресетом по умолчанию (без интерактивных запросов)
-venv/bin/python main.py --preset default
+# Сервер с config.json в корне проекта (или fallback на config.json.example)
+venv/bin/python main.py
 
-# Сервер с другим пресетом
-venv/bin/python main.py --preset deepseek
+# Сервер с конкретным файлом конфигурации
+venv/bin/python main.py --config configs/deepseek.json
 
 # Выбор провайдера
 venv/bin/python main.py --provider localllm
@@ -232,9 +261,10 @@ TRANSLATOR_PROVIDER=localllm venv/bin/python main.py
 
 # TUI (терминальный интерфейс на Textual)
 venv/bin/python tui.py
+venv/bin/python tui.py --config configs/deepseek.json
 ```
 
-В Windows с venv: `venv\Scripts\python main.py --preset default`.
+В Windows с venv: `venv\Scripts\python main.py`.
 
 ## 📦 Использование
 
@@ -252,37 +282,71 @@ curl -X POST http://localhost:5555/translate \
 | `static/index.html` | Web UI — интерфейс перевода в стиле Google Translate |
 | `tui.py` | TUI — терминальный интерфейс перевода на Textual |
 | `translator.py` | `LLMTranslator` — исполнение цепочки fallback |
-| `config.py` | Провайдеры, цепочка перевода, пресеты |
+| `config.py` | Загрузчик конфигурации (.env ключи + parsing config.json) |
 | `prompt_template.py` | Динамический системный/пользовательский промпт (любая языковая пара) |
 | `validator.py` | Валидация языка по скрипту (≥50% целевого алфавита) |
 | `cache_manager.py` | SHA256 JSON-кэш в `cache/` |
 
 ## ⚙️ Конфигурация
 
-Задаётся через `.env` или переменные окружения:
+### .env — только API-ключи
 
-| Переменная | По умолчанию | Описание |
-|---|---|---|
-| `LOCALLLM_API_KEY` | `sk-LocalHost` | API-ключ для локальной LLM |
-| `LOCALLLM_BASE_URL` | `http://192.168.0.124:8080/v1` | OpenAI-совместимый эндпоинт |
-| `LOCALLLM_MODEL` | `QwenCoder` | Название модели |
-| `DEEPSEEK_API_KEY` | — | API-ключ DeepSeek |
-| `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | Эндпоинт DeepSeek |
-| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | Модель DeepSeek |
-| `DEEPSEEK_API_TYPE` | `openai` | `openai` = OpenAI-совместимые chat.completions; `deepseek` = нативный API (top-level `thinking`) |
-| `DEEPSEEK_REASONING_EFFORT` | `off` | `low` \| `high` \| `max` — режим мышления (`off` — выключить; в TUI переключается по F2 на лету) |
-| `LIBRETRANSLATE_URL` | `https://libretranslate.com/translate` | Эндпоинт LibreTranslate |
-| `LOG_TRANSLATION_CONTENT` | `false` | Логировать текст перевода |
+`.env` (gitignored, копируется из `.env.example`) содержит **только API-ключи**. Имя переменной может быть любым — на него ссылается поле `api_key` в `config.json`.
 
-Выбор провайдера: `venv/bin/python main.py --provider localllm` или `TRANSLATOR_PROVIDER=localllm`.
+```
+LOCALLLM_API_KEY=sk-LocalHost
+DEEPSEEK_API_KEY=sk-your-deepseek-key-here
+LIBRETRANSLATE_API_KEY=
+```
 
-Выбор пресета: `venv/bin/python main.py --preset deepseek`. Интерактивный выбор при запуске, если пресет не указан.
+### config.json — конфигурация запуска
 
-> 💡 Готовые минимальные шаблоны лежат в `configs/` (deepseek, localllm, deepseek+fallback). Скопируйте нужный в `config.json` в корне проекта.
+`config.json` (gitignored, копируется из `config.json.example`) определяет провайдеров, цепочку и настройки runtime.
+
+**Разрешение `api_key`:**
+- Если значение — непустая строка и существует как переменная окружения → подставляется значение из env.
+- Если переменной нет → значение остаётся литералом (для локальных серверов, например `"sk-LocalHost"`).
+
+**Структура:**
+```json
+{
+  "providers": {
+    "deepseek": {
+      "api_key": "DEEPSEEK_API_KEY",
+      "base_url": "https://api.deepseek.com/v1",
+      "model": "deepseek-v4-flash",
+      "prefill": "",
+      "api_type": "openai",
+      "reasoning_effort": null
+    }
+  },
+  "default_provider": "deepseek",
+  "translation_chain": [
+    {"type": "llm", "provider": "deepseek", "max_tokens": null}
+  ],
+  "libretranslate_url": "https://libretranslate.com/translate",
+  "libretranslate_api_key": "",
+  "log_translation_content": false
+}
+```
+
+**Приоритет файла конфигурации:**
+1. Переменная окружения `TRANSLATOR_CONFIG` (абсолютный или относительный путь)
+2. `config.json` в корне проекта
+3. `config.json.example` (с предупреждением)
+4. Пустая конфигурация (с ошибкой)
+
+Готовые минимальные шаблоны лежат в `configs/` (deepseek, localllm, deepseek+fallback). Скопируйте нужный в `config.json`.
+
+### Режим мышления (reasoning effort)
+
+Значение по умолчанию из `config.json` (`reasoning_effort`). Переключение в TUI по `F2`: `low` → `high` → `max` → `off`. `off` (None) отключает мышление.
+
+Приоритет: `reasoning_state.json` > `config.json` (или `--config`) > `config.json.example` > пусто.
 
 ## 🔗 Цепочка fallback
 
-Определяется в `config.py` как `TRANSLATION_CHAIN`. Шаги выполняются по порядку:
+Определяется в `config.json` как `translation_chain`. Шаги выполняются по порядку:
 
 - ✅ **Успех** → результат кэшируется и возвращается
 - ❌ **Неудача** → выполняется следующий шаг
@@ -292,12 +356,10 @@ curl -X POST http://localhost:5555/translate \
 - 💬 **chat** (по умолчанию): `chat.completions.create()` с системным/пользовательским сообщением и префиллом
 - ⚡ **completions**: `completions.create()` с сырым промптом и токенами `<|channel|>` (без префилла)
 
-**Типы API провайдеров** (`api_type` в `PROVIDERS`):
+**Типы API провайдеров** (`api_type` в `providers`):
 
 - 🔵 `openai` (по умолчанию): OpenAI-совместимые `chat.completions`, режим мышления уходит как `extra_body["reasoning_effort"]`
 - 🔴 `deepseek`: нативный DeepSeek API, режим мышления уходит как top-level `"thinking": {"reasoning_effort": ...}`
-
-Режим мышления (`low`/`high`/`max`) по умолчанию из `DEEPSEEK_REASONING_EFFORT`, на лету переключается в TUI клавишей `F2`.
 
 **Не-LLM fallback:** `google` (бесплатный API), `libretranslate`.
 
@@ -326,7 +388,7 @@ curl -X POST http://localhost:5555/translate \
   - `Ctrl+T` — смена языков местами
   - `Ctrl+C` — копирование результата перевода
   - `Ctrl+Q` — выход
-- TUI автоматически запускает FastAPI сервер как подпроцесс, либо подключается к уже запущенному на `localhost:5555`
+- TUI автоматически запускает FastAPI сервер как подпроцесс
 - Полноценная альтернатива Web UI — удобно для администрирования сервера или окружений без браузера
 
 | Главный экран TUI |
