@@ -1,0 +1,60 @@
+{
+  "providers": {
+    "localllm": {
+      "api_key": "sk-LocalHost",
+      "base_url": "http://192.168.0.124:8080/v1",
+      "model": "QwenCoder",
+      "prefill": "<|channel|>thought\nМоя задача — перевести текст с английского на русский языки. Я выдаю ТОЛЬКО перевод, без пояснений и оригинального текста. Сохраняю всю пунктуацию. <|channel|>"
+    },
+    "deepseek": {
+      "api_key": "",
+      "base_url": "https://api.deepseek.com/v1",
+      "model": "deepseek-v4-flash",
+      "prefill": "",
+      "api_type": "openai",
+      "reasoning_effort": null
+    }
+  },
+  "default_provider": "localllm",
+  "translation_chain": [
+    {"type": "llm", "provider": "localllm", "multiplier": 8, "cap": 16384},
+    {
+      "type": "llm",
+      "provider": "localllm",
+      "mode": "completions",
+      "temperature": 0.3,
+      "multiplier": 10,
+      "cap": 32768
+    }
+  ],
+  "presets": {
+    "default": {
+      "name": "Default (Local LLM)",
+      "description": "Local Qwen model via chat then completions fallback",
+      "default_provider": "localllm",
+      "translation_chain": [
+        {"type": "llm", "provider": "localllm", "multiplier": 8, "cap": 16384},
+        {
+          "type": "llm",
+          "provider": "localllm",
+          "mode": "completions",
+          "temperature": 0.3,
+          "multiplier": 10,
+          "cap": 32768
+        }
+      ]
+    },
+    "deepseek": {
+      "name": "DeepSeek",
+      "description": "DeepSeek API for translation with Google/LibreTranslate fallback",
+      "default_provider": "deepseek",
+      "translation_chain": [
+        {"type": "llm", "provider": "deepseek", "max_tokens": null},
+        {"type": "google"}
+      ]
+    }
+  },
+  "libretranslate_url": "https://libretranslate.com/translate",
+  "libretranslate_api_key": "",
+  "log_translation_content": false
+}

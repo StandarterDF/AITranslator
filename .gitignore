@@ -18,6 +18,9 @@ cache/*.json
 # Runtime state (reasoning effort persists across restarts)
 reasoning_state.json
 
+# User-local config (gitignored; copy from config.json.example to set up)
+config.json
+
 # Bug tracker — personal notes, not code
 ISSUES.md
 

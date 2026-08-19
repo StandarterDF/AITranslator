@@ -25,11 +25,19 @@ if !errorlevel! neq 0 (
 )
 
 if not exist ".env" (
-    echo [3/3] Creating .env from .env.example...
+    echo [3/4] Creating .env from .env.example...
     copy .env.example .env >nul
     echo   - Don't forget to edit .env with your API keys!
 ) else (
-    echo [3/3] .env already exists, skipping...
+    echo [3/4] .env already exists, skipping...
+)
+
+if not exist "config.json" (
+    echo [4/4] Creating config.json from config.json.example...
+    copy config.json.example config.json >nul
+    echo   - Edit config.json to customize your local setup.
+) else (
+    echo [4/4] config.json already exists, skipping...
 )
 
 echo.

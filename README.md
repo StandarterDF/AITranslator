@@ -28,6 +28,29 @@ chmod +x install.sh start.sh
 
 Server starts at **http://0.0.0.0:5555**.
 
+## 💻 CLI (direct start)
+
+> ⚠️ `start.bat` / `start.sh` are interactive (mode selection + preset selection) and may hang in non-interactive consoles. Use the direct commands below for reliable startup.
+
+```bash
+# Server with default preset (no interactive prompts)
+venv/bin/python main.py --preset default
+
+# Server with another preset
+venv/bin/python main.py --preset deepseek
+
+# Choose a provider
+venv/bin/python main.py --provider localllm
+
+# Or set via environment variable
+TRANSLATOR_PROVIDER=localllm venv/bin/python main.py
+
+# TUI (Textual terminal interface)
+venv/bin/python tui.py
+```
+
+On Windows with venv: `venv\Scripts\python main.py --preset default`.
+
 ## 📦 Usage
 
 ```bash
@@ -60,15 +83,17 @@ Set via `.env` or environment variables:
 | `LOCALLLM_MODEL` | `QwenCoder` | Model name |
 | `DEEPSEEK_API_KEY` | — | DeepSeek API key |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | DeepSeek endpoint |
-| `DEEPSEEK_MODEL` | `deepseek-chat` | DeepSeek model |
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | DeepSeek model |
 | `DEEPSEEK_API_TYPE` | `openai` | `openai` = OpenAI-compatible chat.completions; `deepseek` = native API (top-level `thinking` object) |
-| `DEEPSEEK_REASONING_EFFORT` | `low` | `low` \| `high` \| `max` — reasoning effort (`off` to disable; TUI F2 toggles at runtime) |
+| `DEEPSEEK_REASONING_EFFORT` | `off` | `low` \| `high` \| `max` — reasoning effort (`off` to disable; TUI F2 toggles at runtime) |
 | `LIBRETRANSLATE_URL` | `https://libretranslate.com/translate` | LibreTranslate endpoint |
 | `LOG_TRANSLATION_CONTENT` | `false` | Log translated text |
 
-Provider selection: `python main.py --provider localllm` or `TRANSLATOR_PROVIDER=localllm`.
+Provider selection: `venv/bin/python main.py --provider localllm` or `TRANSLATOR_PROVIDER=localllm`.
 
-Preset selection: `python main.py --preset deepseek`. Interactive choice on startup if none given.
+Preset selection: `venv/bin/python main.py --preset deepseek`. Interactive choice on startup if none given.
+
+> 💡 Ready-made minimal templates are in `configs/` (deepseek, localllm, deepseek+fallback). Copy the one you need to `config.json` in the project root.
 
 ## 🔗 Fallback chain
 
@@ -188,6 +213,29 @@ chmod +x install.sh start.sh
 
 Сервер запускается на **http://0.0.0.0:5555**.
 
+## 💻 CLI (прямой запуск)
+
+> ⚠️ `start.bat` / `start.sh` интерактивны (выбор режима + выбор пресета) и могут зависать в неинтерактивной консоли. Для надёжного запуска используйте прямые команды ниже.
+
+```bash
+# Сервер с пресетом по умолчанию (без интерактивных запросов)
+venv/bin/python main.py --preset default
+
+# Сервер с другим пресетом
+venv/bin/python main.py --preset deepseek
+
+# Выбор провайдера
+venv/bin/python main.py --provider localllm
+
+# Или через переменную окружения
+TRANSLATOR_PROVIDER=localllm venv/bin/python main.py
+
+# TUI (терминальный интерфейс на Textual)
+venv/bin/python tui.py
+```
+
+В Windows с venv: `venv\Scripts\python main.py --preset default`.
+
 ## 📦 Использование
 
 ```bash
@@ -220,15 +268,17 @@ curl -X POST http://localhost:5555/translate \
 | `LOCALLLM_MODEL` | `QwenCoder` | Название модели |
 | `DEEPSEEK_API_KEY` | — | API-ключ DeepSeek |
 | `DEEPSEEK_BASE_URL` | `https://api.deepseek.com/v1` | Эндпоинт DeepSeek |
-| `DEEPSEEK_MODEL` | `deepseek-chat` | Модель DeepSeek |
+| `DEEPSEEK_MODEL` | `deepseek-v4-flash` | Модель DeepSeek |
 | `DEEPSEEK_API_TYPE` | `openai` | `openai` = OpenAI-совместимые chat.completions; `deepseek` = нативный API (top-level `thinking`) |
-| `DEEPSEEK_REASONING_EFFORT` | `low` | `low` \| `high` \| `max` — режим мышления (`off` — выключить; в TUI переключается по F2 на лету) |
+| `DEEPSEEK_REASONING_EFFORT` | `off` | `low` \| `high` \| `max` — режим мышления (`off` — выключить; в TUI переключается по F2 на лету) |
 | `LIBRETRANSLATE_URL` | `https://libretranslate.com/translate` | Эндпоинт LibreTranslate |
 | `LOG_TRANSLATION_CONTENT` | `false` | Логировать текст перевода |
 
-Выбор провайдера: `python main.py --provider localllm` или `TRANSLATOR_PROVIDER=localllm`.
+Выбор провайдера: `venv/bin/python main.py --provider localllm` или `TRANSLATOR_PROVIDER=localllm`.
 
-Выбор пресета: `python main.py --preset deepseek`. Интерактивный выбор при запуске, если пресет не указан.
+Выбор пресета: `venv/bin/python main.py --preset deepseek`. Интерактивный выбор при запуске, если пресет не указан.
+
+> 💡 Готовые минимальные шаблоны лежат в `configs/` (deepseek, localllm, deepseek+fallback). Скопируйте нужный в `config.json` в корне проекта.
 
 ## 🔗 Цепочка fallback
 

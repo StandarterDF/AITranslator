@@ -1,0 +1,18 @@
+{
+  "_comment": "DeepSeek + Google/LibreTranslate fallback. Скопируй в config.json в корне проекта.",
+  "providers": {
+    "deepseek": {
+      "api_key": "",
+      "base_url": "https://api.deepseek.com/v1",
+      "model": "deepseek-v4-flash",
+      "prefill": "",
+      "api_type": "openai",
+      "reasoning_effort": null
+    }
+  },
+  "default_provider": "deepseek",
+  "translation_chain": [
+    {"type": "llm", "provider": "deepseek", "max_tokens": null},
+    {"type": "google"}
+  ]
+}

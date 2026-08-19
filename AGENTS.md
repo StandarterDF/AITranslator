@@ -21,6 +21,7 @@ validator.py     — script-based language validation (Cyrillic ratio ≥ 0.5)
 
 ## Key quirks
 
+- **Local config**: `config.json` (gitignored) overrides all defaults from `config.py` (including env vars). `config.json.example` is committed as a template — copy to `config.json` to set up on a new machine. `configs/` contains ready-made minimal templates (deepseek, localllm, deepseek+fallback) — copy the one you need to `config.json`. Priority: `reasoning_state.json` > `config.json` > env vars > hardcoded defaults. `reasoning_effort` in `config.json` is overridden by `reasoning_state.json` at runtime (F2 toggle).
 - **source/target hardcoded**: `translator.py:126-127` always overrides to `"en"` / `"ru"`. HTTP `source`/`target` params are ignored for LLM steps. Non-LLM fallbacks (`google`, `libretranslate`) use the original request params.
 - **System prompt** (`prompt_template.py:34`) is entirely in Russian, en→ru only.
 - **Fallback chain**: `config.py:12-15` — ordered list of steps. Each step can be an LLM (with provider, prefill, temperature, multiplier overrides) or a non-LLM translator.
