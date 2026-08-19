@@ -100,7 +100,7 @@ LIBRETRANSLATE_API_KEY=
       "base_url": "https://api.deepseek.com/v1",
       "model": "deepseek-v4-flash",
       "prefill": "",
-      "api_type": "openai",
+      "api_type": "deepseek",
       "reasoning_effort": null
     }
   },
@@ -316,7 +316,7 @@ LIBRETRANSLATE_API_KEY=
       "base_url": "https://api.deepseek.com/v1",
       "model": "deepseek-v4-flash",
       "prefill": "",
-      "api_type": "openai",
+      "api_type": "deepseek",
       "reasoning_effort": null
     }
   },
