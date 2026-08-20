@@ -2,6 +2,7 @@ import hashlib
 import json
 import logging
 import time
+import unicodedata
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,16 @@ def _ensure_cache_dir():
 
 
 def _cache_key(source: str, target: str, text: str) -> str:
+    source = (
+        "auto" if source.strip().lower() in ("", "auto") else source.strip().lower()
+    )
+    target = target.strip().lower()
+    text = (
+        unicodedata.normalize("NFC", text)
+        .replace("\r\n", "\n")
+        .replace("\r", "\n")
+        .strip()
+    )
     raw = f"{source}||{target}||{text}"
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
@@ -110,16 +121,18 @@ def list_cache() -> list[dict]:
             continue
         try:
             data = json.loads(p.read_text("utf-8"))
-            entries.append({
-                "hash": data.get("hash", p.stem),
-                "source": data.get("source", ""),
-                "target": data.get("target", ""),
-                "source_text_preview": data.get("source_text", "")[:80],
-                "translated_text_preview": data.get("translated_text", "")[:80],
-                "created_at": data.get("created_at", mtime),
-                "size": len(data.get("source_text", "")),
-                "invalid": data.get("invalid", False),
-            })
+            entries.append(
+                {
+                    "hash": data.get("hash", p.stem),
+                    "source": data.get("source", ""),
+                    "target": data.get("target", ""),
+                    "source_text_preview": data.get("source_text", "")[:80],
+                    "translated_text_preview": data.get("translated_text", "")[:80],
+                    "created_at": data.get("created_at", mtime),
+                    "size": len(data.get("source_text", "")),
+                    "invalid": data.get("invalid", False),
+                }
+            )
         except (json.JSONDecodeError, OSError) as e:
             logger.warning("Failed to read %s: %s", p.name, e)
     entries.sort(key=lambda e: e["created_at"], reverse=True)
