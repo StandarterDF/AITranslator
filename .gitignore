@@ -18,6 +18,9 @@ cache/*.json
 # Runtime state (reasoning effort persists across restarts)
 reasoning_state.json
 
+# Runtime statistics event log (auto-generated)
+stats/events.jsonl
+
 # User-local config (gitignored; copy from config.json.example to set up)
 config.json
 

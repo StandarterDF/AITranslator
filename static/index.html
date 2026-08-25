@@ -74,6 +74,24 @@ body {
   gap: 16px;
 }
 
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+}
+
+.nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.nav-link:hover { background: var(--accent-bg); color: var(--accent); }
+
+.nav-link.current { color: var(--accent); font-weight: 600; }
+
 .theme-toggle {
   width: 38px;
   height: 38px;
@@ -288,7 +306,11 @@ body {
 
 <div class="header">
   <span>AILibreTranslater</span>
-  <button class="theme-toggle" id="theme-toggle" title="Toggle theme">☀</button>
+  <div class="header-right">
+    <span class="nav-link current">Translate</span>
+    <a class="nav-link" href="/stats">Stats</a>
+    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">☀</button>
+  </div>
 </div>
 
 <div class="container">

@@ -29,6 +29,10 @@ def _cache_key(source: str, target: str, text: str) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def cache_key(source: str, target: str, text: str) -> str:
+    return _cache_key(source, target, text)
+
+
 def _file_path(hash_key: str) -> Path:
     return CACHE_DIR / f"{hash_key}.json"
 

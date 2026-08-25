@@ -1,5 +1,6 @@
 import os
 import sys
+import datetime
 
 # Parse --config BEFORE importing config, so the config module sees TRANSLATOR_CONFIG.
 for _i, _arg in enumerate(sys.argv):
@@ -11,7 +12,7 @@ _reload = "--reload" in sys.argv
 
 from contextlib import asynccontextmanager
 from typing import Any
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
 
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 
 import cache_manager
 import config
+import stats_manager
 from translator import LLMTranslator, TranslationError
 
 logging.basicConfig(
@@ -134,6 +136,32 @@ async def invalidate_cache_entry(hash_key: str):
     if not cache_manager.invalidate_cache(hash_key):
         raise HTTPException(404, detail="Cache entry not found")
     return {"detail": "Cache entry invalidated"}
+
+
+@app.get("/stats")
+async def stats_page():
+    return FileResponse(os.path.join(static_dir, "stats.html"))
+
+
+@app.get("/stats/api")
+async def stats_api(
+    from_date: str | None = Query(None, alias="from"),
+    to_date: str | None = Query(None, alias="to"),
+):
+    custom_start = custom_end = None
+    if from_date or to_date:
+        try:
+            d1 = datetime.date.fromisoformat(from_date or "")
+            d2 = datetime.date.fromisoformat(to_date or "")
+        except ValueError:
+            raise HTTPException(400, detail="Dates must be in YYYY-MM-DD format")
+        if d1 > d2:
+            raise HTTPException(400, detail="'from' date must be <= 'to' date")
+        custom_start = datetime.datetime.combine(d1, datetime.time.min).timestamp()
+        custom_end = datetime.datetime.combine(
+            d2 + datetime.timedelta(days=1), datetime.time.min
+        ).timestamp()
+    return stats_manager.build_stats(custom_start=custom_start, custom_end=custom_end)
 
 
 static_dir = os.path.join(os.path.dirname(__file__), "static")

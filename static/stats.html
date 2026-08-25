@@ -1,0 +1,1001 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Statistics — AILibreTranslater</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg: #f8f9fa;
+  --surface: #fff;
+  --surface-alt: #fafafa;
+  --border: #dadce0;
+  --border-light: #f1f3f4;
+  --text: #202124;
+  --text-secondary: #5f6368;
+  --text-placeholder: #9aa0a6;
+  --accent: #1a73e8;
+  --accent-bg: #e8f0fe;
+  --accent-border: #d2e3fc;
+  --error: #d93025;
+  --warn: #e8710a;
+  --ok: #188038;
+  --shadow-focus: rgba(26,115,232,0.15);
+}
+
+[data-theme="dark"] {
+  --bg: #1e1e2e;
+  --surface: #2a2a3c;
+  --surface-alt: #252538;
+  --border: #404060;
+  --border-light: #363650;
+  --text: #e0e0f0;
+  --text-secondary: #9090b0;
+  --text-placeholder: #606080;
+  --accent: #6ea8fe;
+  --accent-bg: #2a3a5c;
+  --accent-border: #3a4a7c;
+  --error: #f28b82;
+  --warn: #f2a960;
+  --ok: #81c995;
+  --shadow-focus: rgba(110,168,254,0.2);
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  min-height: 100vh;
+}
+
+.header {
+  padding: 12px 24px;
+  font-size: 20px;
+  font-weight: 600;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.brand {
+  color: var(--accent);
+  text-decoration: none;
+}
+.brand:hover { text-decoration: underline; }
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  font-size: 14px;
+}
+
+.nav-link {
+  color: var(--text-secondary);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+.nav-link:hover { background: var(--accent-bg); color: var(--accent); }
+.nav-link.current { color: var(--accent); font-weight: 600; }
+
+.theme-toggle {
+  width: 38px;
+  height: 38px;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+.theme-toggle:hover {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.toolbar h1 { font-size: 22px; font-weight: 600; }
+
+.toolbar-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+
+.custom-dates {
+  display: none;
+  gap: 6px;
+  align-items: center;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+.custom-dates.visible { display: flex; }
+
+.custom-dates input[type="date"] {
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  font-family: inherit;
+}
+.custom-dates input[type="date"]:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--shadow-focus);
+}
+
+.btn {
+  padding: 6px 16px;
+  font-size: 13px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn:hover { background: var(--border-light); }
+.btn.active {
+  background: var(--accent-bg);
+  border-color: var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 12px;
+}
+
+.group-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  margin-bottom: -8px;
+}
+
+.stat-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+}
+
+.stat-card .label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  margin-bottom: 6px;
+}
+
+.stat-card .value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.1;
+}
+
+.stat-card .sub { font-size: 12px; color: var(--text-placeholder); margin-top: 4px; }
+.stat-card.ok .value { color: var(--ok); }
+.stat-card.err .value { color: var(--error); }
+.stat-card.acc .value { color: var(--accent); }
+
+.block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 18px 20px;
+}
+
+.block h2 { font-size: 16px; font-weight: 600; margin-bottom: 14px; }
+
+.grid2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+@media (max-width: 900px) {
+  .grid2 { grid-template-columns: 1fr; }
+  .container { padding: 12px; }
+}
+
+.legend {
+  display: flex;
+  gap: 16px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.dot { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.dot.success { background: var(--accent); }
+.dot.cache_hit { background: var(--ok); }
+.dot.error { background: var(--error); }
+
+.chart-box svg { width: 100%; height: auto; display: block; }
+.chart-box .bar:hover { opacity: 0.75; }
+
+.grid2 > .block { display: flex; flex-direction: column; }
+.grid2 > .block > h2 { flex-shrink: 0; }
+.grid2 .chart-box { flex: 1 1 auto; min-height: 240px; }
+.chart-box.fitted svg { height: 100%; }
+
+#tooltip {
+  position: fixed;
+  z-index: 100;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.45;
+  padding: 6px 10px;
+  border-radius: 8px;
+  box-shadow: 0 2px 10px rgba(0,0,0,0.18);
+  pointer-events: none;
+  white-space: pre-line;
+  display: none;
+}
+
+.chart-svg text {
+  fill: var(--text-secondary);
+  font-family: inherit;
+  font-size: 11px;
+}
+.chart-svg .gridline { stroke: var(--border-light); stroke-width: 1; }
+.chart-svg .axis-label { font-size: 11px; }
+.chart-svg .seg-success { fill: var(--accent); }
+.chart-svg .seg-cache_hit { fill: var(--ok); }
+.chart-svg .seg-error { fill: var(--error); }
+.chart-svg .seg-single { fill: var(--accent); }
+
+.empty {
+  color: var(--text-placeholder);
+  font-style: italic;
+  padding: 30px 0;
+  text-align: center;
+  font-size: 14px;
+}
+
+.pair-row {
+  display: grid;
+  grid-template-columns: 110px 1fr 48px;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 0;
+  font-size: 13px;
+}
+.pair-row .pair-name {
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pair-row .track {
+  height: 18px;
+  background: var(--surface-alt);
+  border-radius: 5px;
+  overflow: hidden;
+}
+.pair-row .fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 5px;
+  min-width: 2px;
+  transition: width 0.3s;
+}
+.pair-row .count { text-align: right; font-variant-numeric: tabular-nums; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+th {
+  text-align: left;
+  color: var(--text-secondary);
+  font-weight: 500;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  padding: 6px 10px;
+  border-bottom: 1px solid var(--border);
+}
+td {
+  padding: 7px 10px;
+  border-bottom: 1px solid var(--border-light);
+  vertical-align: top;
+}
+tr:last-child td { border-bottom: none; }
+td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.badge.success { background: var(--accent-bg); color: var(--accent); }
+.badge.cache_hit { background: rgba(24,128,56,0.12); color: var(--ok); }
+.badge.error { background: rgba(217,48,37,0.1); color: var(--error); }
+
+.preview-cell {
+  max-width: 340px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-secondary);
+}
+.error-text { color: var(--error); }
+.tag-backfill {
+  font-size: 10px;
+  color: var(--text-placeholder);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-left: 6px;
+}
+
+.load-error {
+  background: rgba(217,48,37,0.08);
+  border: 1px solid var(--error);
+  color: var(--error);
+  border-radius: 10px;
+  padding: 12px 16px;
+  font-size: 14px;
+  display: none;
+}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <a class="brand" href="/">AILibreTranslater</a>
+  <div class="header-right">
+    <a class="nav-link" href="/">Translate</a>
+    <span class="nav-link current">Stats</span>
+    <button class="theme-toggle" id="theme-toggle" title="Toggle theme">☀</button>
+  </div>
+</div>
+
+<div class="container">
+  <div class="load-error" id="load-error"></div>
+
+  <div class="toolbar">
+    <h1>Translation Statistics</h1>
+    <div class="toolbar-actions">
+      <button class="btn period-btn active" data-period="session">Session</button>
+      <button class="btn period-btn" data-period="1">1D</button>
+      <button class="btn period-btn" data-period="7">7D</button>
+      <button class="btn period-btn" data-period="30">30D</button>
+      <button class="btn period-btn" data-period="all">All</button>
+      <button class="btn period-btn" data-period="custom">Custom</button>
+      <div class="custom-dates" id="custom-dates">
+        <input type="date" id="date-from">
+        <span>–</span>
+        <input type="date" id="date-to">
+      </div>
+      <button class="btn" id="refresh-btn">Refresh</button>
+    </div>
+  </div>
+
+  <div class="group-title" id="scope-title"></div>
+  <div class="cards" id="cards"></div>
+
+  <section class="block">
+    <h2>Requests per day</h2>
+    <div class="legend">
+      <span><span class="dot success"></span>Translated</span>
+      <span><span class="dot cache_hit"></span>Cache hit</span>
+      <span><span class="dot error"></span>Error</span>
+    </div>
+    <div class="chart-box" id="timeline-chart"><div class="empty">Loading…</div></div>
+  </section>
+
+  <div class="grid2">
+    <section class="block">
+      <h2 id="pairs-title">Top language pairs</h2>
+      <div id="pairs-chart"><div class="empty">No data yet</div></div>
+    </section>
+    <section class="block">
+      <h2>Activity by hour of day</h2>
+      <div class="chart-box fitted" id="hourly-chart"><div class="empty">Loading…</div></div>
+    </section>
+  </div>
+
+  <div class="grid2">
+    <section class="block">
+      <h2>Input length distribution</h2>
+      <div class="chart-box" id="length-chart"><div class="empty">Loading…</div></div>
+    </section>
+    <section class="block">
+      <h2>Largest translations</h2>
+      <table id="largest-table">
+        <thead><tr><th>Date</th><th>Pair</th><th class="num">Chars</th><th>Source text</th></tr></thead>
+        <tbody></tbody>
+      </table>
+      <div class="empty" id="largest-empty" style="display:none">No data yet</div>
+    </section>
+  </div>
+
+  <section class="block">
+    <h2>Recent requests</h2>
+    <table id="recent-table">
+      <thead><tr><th>Time</th><th>Status</th><th>Pair</th><th>Step</th><th class="num">Latency</th><th class="num">Chars</th><th>Details</th></tr></thead>
+      <tbody></tbody>
+    </table>
+    <div class="empty" id="recent-empty" style="display:none">No requests logged yet — translate something first</div>
+  </section>
+</div>
+
+<div id="tooltip"></div>
+
+<script>
+const SVGNS = 'http://www.w3.org/2000/svg';
+const state = { data: null, period: 'session', customFrom: null, customTo: null };
+
+const themeToggle = document.getElementById('theme-toggle');
+themeToggle.addEventListener('click', () => {
+  const next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+  document.documentElement.setAttribute('data-theme', next);
+  themeToggle.innerHTML = next === 'dark' ? '☾' : '☀';
+  localStorage.setItem('theme', next);
+  if (state.data) renderAll();
+});
+
+(function() {
+  const saved = localStorage.getItem('theme') || 'light';
+  document.documentElement.setAttribute('data-theme', saved);
+  themeToggle.innerHTML = saved === 'dark' ? '☾' : '☀';
+})();
+
+function svgEl(tag, attrs, parent) {
+  const el = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) el.setAttribute(k, attrs[k]);
+  if (parent) parent.appendChild(el);
+  return el;
+}
+
+function el(tag, cls, text) {
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+
+function fmtInt(n) { return Number(n || 0).toLocaleString('en-US'); }
+
+function localDateKey(d) {
+  return d.getFullYear() + '-' +
+    String(d.getMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getDate()).padStart(2, '0');
+}
+
+const tipBox = document.getElementById('tooltip');
+const customDates = document.getElementById('custom-dates');
+const dateFrom = document.getElementById('date-from');
+const dateTo = document.getElementById('date-to');
+
+(function() {
+  const today = new Date();
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 6);
+  dateFrom.value = localDateKey(weekAgo);
+  dateTo.value = localDateKey(today);
+  state.customFrom = dateFrom.value;
+  state.customTo = dateTo.value;
+})();
+
+function bindTips(id) {
+  const cont = document.getElementById(id);
+  cont.addEventListener('mousemove', e => {
+    const t = e.target.closest ? e.target.closest('[data-tip]') : null;
+    if (t && t.getAttribute('data-tip')) {
+      tipBox.textContent = t.getAttribute('data-tip');
+      tipBox.style.display = 'block';
+      let x = e.clientX + 14, y = e.clientY + 14;
+      const r = tipBox.getBoundingClientRect();
+      if (x + r.width > window.innerWidth - 8) x = e.clientX - r.width - 10;
+      if (y + r.height > window.innerHeight - 8) y = e.clientY - r.height - 10;
+      tipBox.style.left = x + 'px';
+      tipBox.style.top = y + 'px';
+    } else {
+      tipBox.style.display = 'none';
+    }
+  });
+  cont.addEventListener('mouseleave', () => { tipBox.style.display = 'none'; });
+}
+
+function fmtTime(ts) {
+  const d = new Date(ts * 1000);
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ' ' +
+         d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+}
+
+function shortDay(iso) { return iso.slice(5); }
+
+function niceCeil(v) {
+  if (v <= 5) return 5;
+  const exp = Math.floor(Math.log10(v));
+  const base = Math.pow(10, exp);
+  const f = v / base;
+  return Math.ceil(f * 10 - 1e-9) / 10 * base;
+}
+
+function setEmpty(container, message) {
+  container.innerHTML = '';
+  container.appendChild(el('div', 'empty', message));
+}
+
+function fmtUptime(sec) {
+  const m = Math.floor(sec / 60);
+  const h = Math.floor(m / 60);
+  const d = Math.floor(h / 24);
+  if (d > 0) return d + 'd ' + (h % 24) + 'h';
+  if (h > 0) return h + 'h ' + String(m % 60).padStart(2, '0') + 'm';
+  return m + 'm';
+}
+
+function renderCardSet(id, cards) {
+  const c = document.getElementById(id);
+  c.innerHTML = '';
+  for (const card of cards) {
+    const div = el('div', 'stat-card' + (card.cls ? ' ' + card.cls : ''));
+    div.appendChild(el('div', 'label', card.label));
+    div.appendChild(el('div', 'value', card.value));
+    if (card.sub) div.appendChild(el('div', 'sub', card.sub));
+    c.appendChild(div);
+  }
+}
+
+const RANGE_META = {
+  '1': ['1d', 'Today'],
+  '7': ['7d', 'Last 7 days'],
+  '30': ['30d', 'Last 30 days'],
+  'all': ['all', 'All time'],
+  'custom': ['custom', 'Custom period']
+};
+
+function renderCards(d) {
+  const titleEl = document.getElementById('scope-title');
+  let cards;
+
+  if (state.period === 'session') {
+    const s = d.session || {};
+    const start = s.started_at ? new Date(s.started_at * 1000) : null;
+    titleEl.textContent = start
+      ? 'Current session — since ' + start.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+      : 'Current session';
+    cards = [
+      { label: 'Total requests', value: fmtInt(s.requests || 0), sub: start ? fmtUptime(Date.now() / 1000 - s.started_at) + ' uptime' : null },
+      { label: 'Translated', value: fmtInt(s.success || 0), cls: 'ok', sub: s.hit_rate != null ? 'hit rate ' + Math.round(s.hit_rate * 100) + '%' : null },
+      { label: 'Cache hits', value: fmtInt(s.cache_hits || 0), cls: 'acc' },
+      { label: 'Errors', value: fmtInt(s.errors || 0), cls: (s.errors || 0) > 0 ? 'err' : '' },
+      { label: 'Avg latency', value: s.avg_latency_s != null ? s.avg_latency_s.toFixed(1) + 's' : '—' },
+      { label: 'Tokens', value: fmtInt((s.prompt_tokens || 0) + (s.completion_tokens || 0)), sub: fmtInt(s.prompt_tokens || 0) + ' in / ' + fmtInt(s.completion_tokens || 0) + ' out' },
+      { label: 'Characters', value: fmtInt(s.chars_in || 0), sub: '→ ' + fmtInt(s.chars_out || 0) + ' translated' }
+    ];
+  } else {
+    const [rk, rt] = RANGE_META[state.period] || RANGE_META.all;
+    const r = (d.ranges && d.ranges[rk]) || {};
+    let title = rt;
+    if (state.period === 'custom') {
+      title = r.since && r.until ? `Custom — ${r.since} to ${r.until}` : 'Custom — pick dates';
+    } else if (r.since) {
+      title = rt + ' — since ' + r.since;
+    }
+    titleEl.textContent = title;
+    cards = [
+      { label: 'Total requests', value: fmtInt(r.requests || 0), sub: r.since ? 'since ' + r.since : null },
+      { label: 'Translated', value: fmtInt(r.success || 0), cls: 'ok', sub: r.hit_rate != null ? 'hit rate ' + Math.round(r.hit_rate * 100) + '%' : null },
+      { label: 'Cache hits', value: fmtInt(r.cache_hits || 0), cls: 'acc' },
+      { label: 'Errors', value: fmtInt(r.errors || 0), cls: (r.errors || 0) > 0 ? 'err' : '' },
+      { label: 'Avg latency', value: r.avg_latency_s != null ? r.avg_latency_s.toFixed(1) + 's' : '—' },
+      { label: 'Tokens', value: fmtInt((r.prompt_tokens || 0) + (r.completion_tokens || 0)), sub: fmtInt(r.prompt_tokens || 0) + ' in / ' + fmtInt(r.completion_tokens || 0) + ' out' },
+      { label: 'Characters', value: fmtInt(r.chars_in || 0), sub: '→ ' + fmtInt(r.chars_out || 0) + ' translated' }
+    ];
+    if (state.period === 'all') {
+      cards.push({ label: 'Cache entries', value: fmtInt(d.cache.entries), sub: d.cache.invalid > 0 ? d.cache.invalid + ' invalidated' : null });
+    }
+  }
+
+  renderCardSet('cards', cards);
+}
+
+function timelineRows() {
+  const d = state.data;
+  if (state.period === 'session') {
+    const hm = t => t.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+    const rows = (d.session_timeline || []).map(x => {
+      const from = new Date(x.ts * 1000);
+      const to = new Date((x.ts + 3600) * 1000);
+      return {
+        label: hm(from),
+        title: from.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) + ', ' + hm(from) + ' – ' + hm(to),
+        success: x.success || 0,
+        cache_hit: x.cache_hit || 0,
+        error: x.error || 0
+      };
+    });
+    return { rows, empty: 'No requests yet this session' };
+  }
+
+  if (state.period === 'custom') {
+    const f = state.customFrom, t2 = state.customTo;
+    if (!f || !t2 || f > t2) return { rows: [], empty: 'Pick both dates to build the chart' };
+    const map = {};
+    for (const dd of d.timeline || []) map[dd.date] = dd;
+    const rows = [];
+    const cur = new Date(f + 'T00:00:00');
+    const endD = new Date(t2 + 'T00:00:00');
+    while (cur <= endD && rows.length < 400) {
+      const key = localDateKey(cur);
+      const dd = map[key] || { success: 0, cache_hit: 0, error: 0 };
+      rows.push({
+        label: shortDay(key),
+        title: key,
+        success: dd.success,
+        cache_hit: dd.cache_hit,
+        error: dd.error
+      });
+      cur.setDate(cur.getDate() + 1);
+    }
+    return { rows, empty: 'No requests in this period' };
+  }
+
+  let days;
+  if (state.period === 'all') {
+    days = (d.timeline || []).slice();
+  } else {
+    const n = parseInt(state.period, 10);
+    const map = {};
+    for (const dd of d.timeline || []) map[dd.date] = dd;
+    days = [];
+    const cur = new Date();
+    cur.setHours(0, 0, 0, 0);
+    for (let i = n - 1; i >= 0; i--) {
+      const dt = new Date(cur);
+      dt.setDate(dt.getDate() - i);
+      const key = localDateKey(dt);
+      days.push(map[key] || { date: key, success: 0, cache_hit: 0, error: 0 });
+    }
+  }
+  return {
+    rows: days.map(dd => ({
+      label: shortDay(dd.date),
+      title: dd.date,
+      success: dd.success,
+      cache_hit: dd.cache_hit,
+      error: dd.error
+    })),
+    empty: state.period === 'all' ? 'No data yet' : 'No requests in this period'
+  };
+}
+
+function renderTimeline() {
+  const cont = document.getElementById('timeline-chart');
+  cont.innerHTML = '';
+  const { rows, empty } = timelineRows();
+
+  if (!rows.length || !rows.some(r => r.success + r.cache_hit + r.error > 0)) {
+    setEmpty(cont, empty);
+    return;
+  }
+
+  const W = 900, H = 280, padL = 46, padR = 12, padT = 14, padB = 32;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const s = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, 'class': 'chart-svg' }, cont);
+
+  const maxV = niceCeil(Math.max(1, ...rows.map(r => r.success + r.cache_hit + r.error)));
+
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + plotH - (i / 4) * plotH;
+    svgEl('line', { x1: padL, y1: y, x2: W - padR, y2: y, 'class': 'gridline' }, s);
+    const lbl = svgEl('text', { x: padL - 8, y: y + 4, 'text-anchor': 'end' }, s);
+    lbl.textContent = fmtInt(Math.round(maxV * i / 4));
+  }
+
+  const n = rows.length;
+  const step = plotW / n;
+  const bw = Math.max(2, Math.min(step * 0.72, 34));
+  const labelEvery = Math.ceil(n / 12);
+
+  rows.forEach((r, i) => {
+    const total = r.success + r.cache_hit + r.error;
+    const x0 = padL + i * step;
+    let yAcc = padT + plotH;
+    const tipText = `${r.title}\ntranslated: ${fmtInt(r.success)}\ncache hits: ${fmtInt(r.cache_hit)}\nerrors: ${fmtInt(r.error)}\ntotal: ${fmtInt(total)}`;
+    const segs = [['success', r.success], ['cache_hit', r.cache_hit], ['error', r.error]];
+    for (const [key, val] of segs) {
+      if (val <= 0) continue;
+      const h = Math.max(2, val / maxV * plotH);
+      yAcc -= h;
+      const rect = svgEl('rect', {
+        x: x0 + (step - bw) / 2, y: yAcc, width: bw, height: h,
+        rx: 2, 'class': 'bar seg-' + key
+      }, s);
+      rect.setAttribute('data-tip', tipText);
+    }
+    if (i % labelEvery === 0 || i === n - 1) {
+      const xl = svgEl('text', { x: x0 + step / 2, y: H - padB + 16, 'text-anchor': 'middle' }, s);
+      xl.textContent = r.label;
+    }
+  });
+}
+
+function scopeData() {
+  const d = state.data;
+  if (!d) return {};
+  if (state.period === 'session') return d.session || {};
+  const rk = (RANGE_META[state.period] || RANGE_META.all)[0];
+  return (d.ranges && d.ranges[rk]) || {};
+}
+
+function renderPairs() {
+  const cont = document.getElementById('pairs-chart');
+  const s = scopeData();
+  const pairs = s.lang_pairs || [];
+  const title = document.getElementById('pairs-title');
+  title.textContent = pairs.length ? `Top language pairs (${s.pair_count} total)` : 'Top language pairs';
+  if (!pairs.length) { setEmpty(cont, 'No data yet'); return; }
+  cont.innerHTML = '';
+  const maxC = pairs[0].count;
+  for (const p of pairs) {
+    const row = el('div', 'pair-row');
+    row.appendChild(el('span', 'pair-name', p.pair));
+    const track = el('div', 'track');
+    const fill = el('div', 'fill');
+    fill.style.width = Math.max(1, p.count / maxC * 100) + '%';
+    track.setAttribute('data-tip', `${p.pair}: ${fmtInt(p.count)} translations`);
+    track.appendChild(fill);
+    row.appendChild(track);
+    row.appendChild(el('span', 'count', fmtInt(p.count)));
+    cont.appendChild(row);
+  }
+}
+
+function renderHourly() {
+  const cont = document.getElementById('hourly-chart');
+  cont.innerHTML = '';
+  const data = scopeData().hourly || [];
+  if (!data.length || Math.max(...data) === 0) { setEmpty(cont, 'No data yet'); return; }
+
+  const W = Math.max(140, Math.floor(cont.clientWidth));
+  const H = Math.max(200, Math.floor(cont.clientHeight));
+  const padL = 36, padR = 8, padT = 18, padB = 28;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const s = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, 'class': 'chart-svg' }, cont);
+  s.style.width = '100%';
+  s.style.height = '100%';
+
+  const maxV = niceCeil(Math.max(...data));
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + plotH - (i / 4) * plotH;
+    svgEl('line', { x1: padL, y1: y, x2: W - padR, y2: y, 'class': 'gridline' }, s);
+    const lbl = svgEl('text', { x: padL - 6, y: y + 4, 'text-anchor': 'end' }, s);
+    lbl.textContent = fmtInt(Math.round(maxV * i / 4));
+  }
+
+  const step = plotW / 24;
+  const bw = step * 0.7;
+  data.forEach((v, h) => {
+    const bh = v > 0 ? Math.max(2, v / maxV * plotH) : 0;
+    if (bh > 0) {
+      const bar = svgEl('rect', {
+        x: padL + h * step + (step - bw) / 2, y: padT + plotH - bh,
+        width: bw, height: bh, rx: 2, 'class': 'bar seg-single'
+      }, s);
+      bar.setAttribute('data-tip', `${String(h).padStart(2, '0')}:00 — ${fmtInt(v)} requests`);
+      const cl = svgEl('text', {
+        x: padL + h * step + step / 2, y: padT + plotH - bh - 5, 'text-anchor': 'middle'
+      }, s);
+      cl.textContent = fmtInt(v);
+    }
+    if (h % 3 === 0) {
+      const xl = svgEl('text', { x: padL + h * step + step / 2, y: H - padB + 16, 'text-anchor': 'middle' }, s);
+      xl.textContent = String(h).padStart(2, '0');
+    }
+  });
+}
+
+function renderLength() {
+  const cont = document.getElementById('length-chart');
+  cont.innerHTML = '';
+  const buckets = scopeData().length_buckets || [];
+  const totalCount = buckets.reduce((a, b) => a + b.count, 0);
+  if (!buckets.length || totalCount === 0) { setEmpty(cont, 'No data yet'); return; }
+
+  const W = Math.max(140, Math.floor(cont.clientWidth));
+  const H = Math.max(200, Math.floor(cont.clientHeight));
+  const padL = 40, padR = 8, padT = 22, padB = 28;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const s = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, width: W, height: H, 'class': 'chart-svg' }, cont);
+  s.style.width = '100%';
+  s.style.height = '100%';
+
+  const maxV = niceCeil(Math.max(...buckets.map(b => b.count)));
+  for (let i = 0; i <= 4; i++) {
+    const y = padT + plotH - (i / 4) * plotH;
+    svgEl('line', { x1: padL, y1: y, x2: W - padR, y2: y, 'class': 'gridline' }, s);
+    const lbl = svgEl('text', { x: padL - 6, y: y + 4, 'text-anchor': 'end' }, s);
+    lbl.textContent = fmtInt(Math.round(maxV * i / 4));
+  }
+
+  const n = buckets.length;
+  const step = plotW / n;
+  const bw = step * 0.6;
+  buckets.forEach((b, i) => {
+    const bh = b.count > 0 ? Math.max(2, b.count / maxV * plotH) : 0;
+    const cx = padL + i * step + step / 2;
+    if (bh > 0) {
+      const pct = Math.round(b.count / totalCount * 100);
+      const bar = svgEl('rect', {
+        x: padL + i * step + (step - bw) / 2, y: padT + plotH - bh,
+        width: bw, height: bh, rx: 2, 'class': 'bar seg-single'
+      }, s);
+      bar.setAttribute('data-tip', `${b.label} chars\n${fmtInt(b.count)} translations (${pct}%)`);
+      const cl = svgEl('text', { x: cx, y: padT + plotH - bh - 5, 'text-anchor': 'middle' }, s);
+      cl.textContent = fmtInt(b.count);
+    }
+    const xl = svgEl('text', { x: cx, y: H - padB + 16, 'text-anchor': 'middle' }, s);
+    xl.textContent = b.label;
+  });
+}
+
+function renderLargest() {
+  const tbody = document.querySelector('#largest-table tbody');
+  tbody.innerHTML = '';
+  const rows = scopeData().largest || [];
+  document.getElementById('largest-empty').style.display = rows.length ? 'none' : '';
+  document.getElementById('largest-table').style.display = rows.length ? '' : 'none';
+  for (const r of rows) {
+    const tr = el('tr');
+    tr.appendChild(el('td', null, new Date(r.ts * 1000).toISOString().slice(0, 10)));
+    tr.appendChild(el('td', null, r.pair || '—'));
+    tr.appendChild(el('td', 'num', fmtInt(r.chars)));
+    const pv = el('td', 'preview-cell', r.preview || '');
+    if (r.backfill) pv.appendChild(el('span', 'tag-backfill', 'cache'));
+    tr.appendChild(pv);
+    tbody.appendChild(tr);
+  }
+}
+
+function renderRecent() {
+  const tbody = document.querySelector('#recent-table tbody');
+  tbody.innerHTML = '';
+  const rows = state.data.recent || [];
+  document.getElementById('recent-empty').style.display = rows.length ? 'none' : '';
+  document.getElementById('recent-table').style.display = rows.length ? '' : 'none';
+  for (const r of rows) {
+    const tr = el('tr');
+    tr.appendChild(el('td', null, fmtTime(r.ts)));
+    const badge = el('span', 'badge ' + (r.type || ''), r.type === 'cache_hit' ? 'cached' : r.type);
+    const tdBadge = el('td');
+    tdBadge.appendChild(badge);
+    tr.appendChild(tdBadge);
+    tr.appendChild(el('td', null, (r.source || '?') + '→' + (r.target || '?')));
+    tr.appendChild(el('td', 'preview-cell', r.step || (r.steps_failed ? 'failed: ' + r.steps_failed.join(', ') : '—')));
+    tr.appendChild(el('td', 'num', r.latency_s != null ? r.latency_s.toFixed(1) + 's' : '—'));
+    tr.appendChild(el('td', 'num', fmtInt(r.input_chars)));
+    const details = el('td', 'preview-cell' + (r.error ? ' error-text' : ''),
+      r.error || (r.prompt_tokens || r.completion_tokens
+        ? fmtInt(r.prompt_tokens) + '+' + fmtInt(r.completion_tokens) + ' tok'
+        : ''));
+    details.title = details.textContent;
+    tr.appendChild(details);
+    tbody.appendChild(tr);
+  }
+}
+
+function renderAll() {
+  renderCards(state.data);
+  renderTimeline();
+  renderPairs();
+  renderHourly();
+  renderLength();
+  renderLargest();
+  renderRecent();
+}
+
+async function load() {
+  const errBox = document.getElementById('load-error');
+  try {
+    const resp = await fetch('/stats/api');
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    state.data = await resp.json();
+    errBox.style.display = 'none';
+    renderAll();
+  } catch (e) {
+    errBox.textContent = 'Failed to load statistics: ' + e.message;
+    errBox.style.display = '';
+  }
+}
+
+document.querySelectorAll('.period-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    state.period = btn.dataset.period;
+    customDates.classList.toggle('visible', state.period === 'custom');
+    if (state.data) {
+      renderAll();
+      if (state.period === 'custom') refreshCustomCards();
+    }
+  });
+});
+
+const FIT_RENDERERS = { 'hourly-chart': renderHourly, 'length-chart': renderLength };
+const fitRaf = new Map();
+function scheduleFit(id) {
+  if (fitRaf.has(id)) return;
+  fitRaf.set(id, requestAnimationFrame(() => {
+    fitRaf.delete(id);
+    if (state.data) FIT_RENDERERS[id]();
+  }));
+}
+const chartRO = new ResizeObserver(entries => {
+  for (const en of entries) scheduleFit(en.target.id);
+});
+Object.keys(FIT_RENDERERS).forEach(id => chartRO.observe(document.getElementById(id)));
+
+async function refreshCustomCards() {
+  const f = state.customFrom, t = state.customTo;
+  if (!f || !t || f > t) { renderCards(state.data); return; }
+  try {
+    const resp = await fetch('/stats/api?from=' + f + '&to=' + t);
+    if (!resp.ok) return;
+    const fresh = await resp.json();
+    if (fresh.ranges && fresh.ranges.custom) {
+      state.data.ranges = state.data.ranges || {};
+      state.data.ranges.custom = fresh.ranges.custom;
+      renderAll();
+    }
+  } catch (e) {
+  }
+}
+
+function onCustomDateChange() {
+  state.customFrom = dateFrom.value || null;
+  state.customTo = dateTo.value || null;
+  if (state.period === 'custom' && state.data) {
+    renderTimeline();
+    refreshCustomCards();
+  }
+}
+
+dateFrom.addEventListener('change', onCustomDateChange);
+dateTo.addEventListener('change', onCustomDateChange);
+
+document.getElementById('refresh-btn').addEventListener('click', load);
+
+['timeline-chart', 'hourly-chart', 'length-chart', 'pairs-chart'].forEach(bindTips);
+
+load();
+</script>
+
+</body>
+</html>

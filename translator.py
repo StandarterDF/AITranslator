@@ -7,6 +7,7 @@ from openai import AsyncClient
 
 import cache_manager
 import config
+import stats_manager
 from prompt_template import LANGUAGE_NAMES, format_prompt
 from validator import validate_translation
 
@@ -199,10 +200,23 @@ class LLMTranslator:
         source_lang = source if source != "auto" else source
         target_lang = target
 
+        req_start = time.monotonic()
+        tokens_before = (self.prompt_tokens, self.completion_tokens)
+        key = cache_manager.cache_key(source_lang, target_lang, text)
+
         cached = cache_manager.get_cache(source_lang, target_lang, text)
         if cached is not None:
             self.cached += 1
             logger.info("Using cached translation")
+            stats_manager.log_event(
+                "cache_hit",
+                hash_key=key,
+                source=source_lang,
+                target=target_lang,
+                latency_s=time.monotonic() - req_start,
+                input_chars=len(text),
+                preview=text[:80],
+            )
             cached = restore_urls(text, cached)
             return {"translatedText": cached}
 
@@ -211,6 +225,7 @@ class LLMTranslator:
 
         total = len(self.chain)
         errors: list[str] = []
+        failed_labels: list[str] = []
 
         for idx, step in enumerate(self.chain):
             step_num = idx + 1
@@ -235,6 +250,7 @@ class LLMTranslator:
                         label,
                     )
                     errors.append(f"step {step_num}: unknown type '{step_type}'")
+                    failed_labels.append(label)
                     continue
 
                 elapsed = time.monotonic() - start
@@ -249,12 +265,27 @@ class LLMTranslator:
                     if config.LOG_TRANSLATION_CONTENT:
                         logger.info("Content: %s", clean)
                     cache_manager.set_cache(source_lang, target_lang, text, clean)
+                    stats_manager.log_event(
+                        "success",
+                        hash_key=key,
+                        source=source_lang,
+                        target=target_lang,
+                        step=label,
+                        steps_failed=failed_labels or None,
+                        latency_s=time.monotonic() - req_start,
+                        input_chars=len(text),
+                        output_chars=len(clean),
+                        prompt_tokens=self.prompt_tokens - tokens_before[0],
+                        completion_tokens=self.completion_tokens - tokens_before[1],
+                        preview=text[:80],
+                    )
                     return {"translatedText": clean}
 
                 logger.warning(
                     "[%d/%d] %s — empty result (%.1fs)", step_num, total, label, elapsed
                 )
                 errors.append(f"step {step_num}: empty result")
+                failed_labels.append(label)
 
             except TranslationError as e:
                 elapsed = time.monotonic() - start
@@ -267,6 +298,7 @@ class LLMTranslator:
                     elapsed,
                 )
                 errors.append(f"step {step_num}: {e.message}")
+                failed_labels.append(label)
             except Exception as e:
                 elapsed = time.monotonic() - start
                 logger.warning(
@@ -278,8 +310,18 @@ class LLMTranslator:
                     elapsed,
                 )
                 errors.append(f"step {step_num}: {e}")
+                failed_labels.append(label)
 
         self.errors += 1
+        stats_manager.log_event(
+            "error",
+            source=source_lang,
+            target=target_lang,
+            steps_failed=failed_labels or None,
+            latency_s=time.monotonic() - req_start,
+            input_chars=len(text),
+            error=f"All {total} translation steps failed",
+        )
         raise TranslationError(
             f"All {total} translation steps failed. Errors: {'; '.join(errors)}",
             502,
