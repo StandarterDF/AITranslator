@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import patch, MagicMock
 
+import markdown_guard
 from validator import validate_translation, LANGUAGE_SCRIPTS
 from cache_manager import _cache_key
 
@@ -226,3 +227,69 @@ class TestEstimateTokens:
         assert estimate_max_output_tokens("a", multiplier=1.0, cap=4096) == 256
         result = estimate_max_output_tokens("a" * 1000, multiplier=0.5, cap=100)
         assert result == 256  # clamped to minimum 256
+
+
+class TestMarkdownGuard:
+    ROUNDTRIP_CASES = [
+        "no markdown here",
+        "*action* plain",
+        "word *word* word",
+        "*a* *b* *c*",
+        "**bold** and `code`",
+        "<!-- comment -->\n\ntext *x*",
+        "text with https://example.com/page and *em*",
+        '<audio controls=""><source src="https://a.b/c"></audio>',
+        "*multi\nline\naction*",
+        "**unbalanced * stars**",
+    ]
+
+    def test_roundtrip_is_exact(self):
+        for text in self.ROUNDTRIP_CASES:
+            masked = markdown_guard.mask_markdown(text)
+            assert markdown_guard.restore_markdown(masked.text, masked) == text
+
+    def test_has_markdown(self):
+        assert markdown_guard.has_markdown("*a*")
+        assert markdown_guard.has_markdown("`code`")
+        assert markdown_guard.has_markdown("<!-- x -->")
+        assert markdown_guard.has_markdown("https://example.com")
+        assert not markdown_guard.has_markdown("plain text 123")
+
+    def test_placeholder_separated_from_neighbours(self):
+        masked = markdown_guard.mask_markdown("x*a*y")
+        assert f"x {masked.placeholder(0)} a" in masked.text
+        assert f"a {masked.placeholder(1)} y" in masked.text
+
+    def test_missing_placeholders_detected(self):
+        masked = markdown_guard.mask_markdown("*a* *b*")
+        broken = masked.text.replace(masked.placeholder(0), "")
+        assert markdown_guard.missing_placeholders(broken, masked) == [0]
+
+    def test_no_missing_when_intact(self):
+        masked = markdown_guard.mask_markdown("*a* *b*")
+        assert markdown_guard.missing_placeholders(masked.text, masked) == []
+
+    def test_residual_placeholders_stripped(self):
+        masked = markdown_guard.mask_markdown("*a*")
+        out = markdown_guard.restore_markdown(
+            f"перевод {masked.placeholder(999)} тут", masked
+        )
+        assert masked.open not in out and masked.close not in out
+
+    def test_collision_guard_picks_other_format(self):
+        masked = markdown_guard.mask_markdown("text {{0}} and *em*")
+        assert masked.open != "{{"
+        assert (
+            markdown_guard.restore_markdown(masked.text, masked)
+            == "text {{0}} and *em*"
+        )
+
+    def test_instruction_mentions_placeholder(self):
+        masked = markdown_guard.mask_markdown("*a*")
+        assert masked.placeholder(0) in markdown_guard.markdown_instruction(masked)
+
+    def test_emphasis_preserved_through_mask(self):
+        masked = markdown_guard.mask_markdown("*Она ушла.*")
+        assert masked.text.count(masked.placeholder(0)) == 1
+        restored = markdown_guard.restore_markdown(masked.text, masked)
+        assert restored == "*Она ушла.*"

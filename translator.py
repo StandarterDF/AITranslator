@@ -7,6 +7,7 @@ from openai import AsyncClient
 
 import cache_manager
 import config
+import markdown_guard
 import stats_manager
 from prompt_template import LANGUAGE_NAMES, format_prompt
 from validator import validate_translation
@@ -113,6 +114,13 @@ _NON_LLM_TRANSLATORS = {
     "google": _translate_google,
     "libretranslate": _translate_libretranslate,
 }
+
+
+def _mask_if_needed(text: str) -> markdown_guard.MaskedText | None:
+    """Mask Markdown constructs, unless preservation is disabled or none found."""
+    if not config.PRESERVE_MARKDOWN or not markdown_guard.has_markdown(text):
+        return None
+    return markdown_guard.mask_markdown(text)
 
 
 class LLMTranslator:
@@ -239,9 +247,12 @@ class LLMTranslator:
                         text, source_lang, target_lang, step, step["provider"]
                     )
                 elif step_type in _NON_LLM_TRANSLATORS:
+                    masked = _mask_if_needed(text)
                     result = await _NON_LLM_TRANSLATORS[step_type](
-                        text, source_lang, target_lang
+                        masked.text if masked else text, source_lang, target_lang
                     )
+                    if masked and result:
+                        result = markdown_guard.restore_markdown(result, masked)
                 else:
                     logger.warning(
                         "[%d/%d] %s — unknown step type, skipped",
@@ -351,10 +362,14 @@ class LLMTranslator:
                 cfg,
             )
 
-        parts = format_prompt(source, target, text)
+        masked = _mask_if_needed(text)
+        parts = format_prompt(source, target, masked.text if masked else text)
+        user_content = parts["user"]
+        if masked:
+            user_content += markdown_guard.markdown_instruction(masked)
         messages: list[dict[str, str]] = [
             {"role": "system", "content": parts["system"]},
-            {"role": "user", "content": parts["user"]},
+            {"role": "user", "content": user_content},
         ]
 
         if "prefill" in step:
@@ -457,6 +472,14 @@ class LLMTranslator:
         if "\n\nПеревод:" in content:
             content = content.split("\n\nПеревод:", 1)[-1].strip()
 
+        if masked:
+            missing = markdown_guard.missing_placeholders(content, masked)
+            content = markdown_guard.restore_markdown(content, masked)
+            if missing:
+                logger.warning(
+                    "Markdown placeholders missing after LLM step: %s", missing
+                )
+
         if not validate_translation(content, target):
             logger.warning(
                 "Validation raw content (after strip): %r",
@@ -482,9 +505,12 @@ class LLMTranslator:
         source_name = LANGUAGE_NAMES.get(source, source)
         target_name = LANGUAGE_NAMES.get(target, target)
 
+        masked = _mask_if_needed(text)
+        instruction = markdown_guard.markdown_instruction(masked) if masked else ""
         prompt = (
             f"<|channel|>user\n"
-            f"Переведи следующий текст с {source_name} на {target_name}:\n\n{text}\n\n"
+            f"Переведи следующий текст с {source_name} на {target_name}:\n\n"
+            f"{masked.text if masked else text}{instruction}\n\n"
             f"Перевод:<|channel|>\n"
             f"<|channel|>assistant\n"
         )
@@ -549,6 +575,15 @@ class LLMTranslator:
         content = content.strip()
         if "\n\nПеревод:" in content:
             content = content.split("\n\nПеревод:", 1)[-1].strip()
+
+        if masked:
+            missing = markdown_guard.missing_placeholders(content, masked)
+            content = markdown_guard.restore_markdown(content, masked)
+            if missing:
+                logger.warning(
+                    "Markdown placeholders missing after completions step: %s",
+                    missing,
+                )
 
         if not validate_translation(content, target):
             logger.warning(

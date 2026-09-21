@@ -42,6 +42,16 @@ def _parse_log_translation_content(val) -> bool:
     return False
 
 
+def _parse_bool(value, default: bool = False) -> bool:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.lower() in ("true", "1", "yes")
+    return bool(value)
+
+
 # ---------------------------------------------------------------------------
 # Config file resolution
 # ---------------------------------------------------------------------------
@@ -158,6 +168,9 @@ LIBRETRANSLATE_API_KEY: str = raw.get("libretranslate_api_key", "")
 LOG_TRANSLATION_CONTENT: bool = _parse_log_translation_content(
     raw.get("log_translation_content", False)
 )
+
+# Markdown preservation (mask markers before LLM, restore after)
+PRESERVE_MARKDOWN: bool = _parse_bool(raw.get("preserve_markdown"), default=True)
 
 
 def _parse_log_level(value) -> str:
