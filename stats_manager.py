@@ -29,6 +29,20 @@ def _ensure_stats_dir():
     STATS_DIR.mkdir(parents=True, exist_ok=True)
 
 
+def _safe_float(value, default: float = 0.0) -> float:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_int(value, default: int = 0) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def log_event(
     event_type: str,
     *,
@@ -93,10 +107,27 @@ def read_events() -> list[dict]:
                     continue
                 try:
                     data = json.loads(line)
-                    if isinstance(data, dict):
-                        events.append(data)
-                    else:
+                    if not isinstance(data, dict):
                         logger.warning("Skipping non-object stats line %d", line_no)
+                        continue
+                    ts = _safe_float(data.get("ts"), default=-1.0)
+                    if ts < 0:
+                        logger.warning(
+                            "Skipping stats line %d with invalid ts", line_no
+                        )
+                        continue
+                    data["ts"] = ts
+                    for field in (
+                        "input_chars",
+                        "output_chars",
+                        "prompt_tokens",
+                        "completion_tokens",
+                    ):
+                        if field in data:
+                            data[field] = _safe_int(data[field])
+                    if "latency_s" in data:
+                        data["latency_s"] = _safe_float(data["latency_s"])
+                    events.append(data)
                 except ValueError:
                     logger.warning("Skipping corrupt stats line %d", line_no)
     except OSError as e:
@@ -131,10 +162,12 @@ def summarize(events: list[dict]) -> dict:
         "avg_latency_s": (
             round(sum(latencies) / len(latencies), 3) if latencies else None
         ),
-        "prompt_tokens": sum(e.get("prompt_tokens", 0) for e in events),
-        "completion_tokens": sum(e.get("completion_tokens", 0) for e in events),
-        "chars_in": sum(int(e.get("input_chars", 0)) for e in events),
-        "chars_out": sum(int(e.get("output_chars", 0)) for e in events),
+        "prompt_tokens": sum(_safe_int(e.get("prompt_tokens", 0)) for e in events),
+        "completion_tokens": sum(
+            _safe_int(e.get("completion_tokens", 0)) for e in events
+        ),
+        "chars_in": sum(_safe_int(e.get("input_chars", 0)) for e in events),
+        "chars_out": sum(_safe_int(e.get("output_chars", 0)) for e in events),
     }
 
 
@@ -153,14 +186,14 @@ def _aggregate(events: list[dict]) -> dict:
 
     for e in events:
         etype = e.get("type", "")
-        ts = e.get("ts", 0)
+        ts = _safe_float(e.get("ts", 0))
         hourly[time.localtime(ts).tm_hour] += 1
         src = e.get("source", "")
         tgt = e.get("target", "")
         if src or tgt:
             pk = f"{src}\u2192{tgt}"
             pairs[pk] = pairs.get(pk, 0) + 1
-        ic = int(e.get("input_chars", 0))
+        ic = _safe_int(e.get("input_chars", 0))
         if etype != "error":
             buckets[_bucket_index(ic)] += 1
             largest.append(
@@ -200,7 +233,7 @@ def build_stats(
     cache_entries = cache_manager.list_cache()
     backfill: list[dict] = []
     for c in cache_entries:
-        if c["hash"] in success_hashes:
+        if c["hash"] in success_hashes or c.get("invalid"):
             continue
         backfill.append(
             {
@@ -215,9 +248,9 @@ def build_stats(
             }
         )
 
-    combined = sorted(events + backfill, key=lambda e: e.get("ts", 0))
+    combined = sorted(events + backfill, key=lambda e: _safe_float(e.get("ts", 0)))
 
-    t = summarize(events)
+    t = summarize(combined)
 
     range_defs = {
         "1d": _local_midnight(0),
@@ -227,7 +260,7 @@ def build_stats(
     }
     ranges = {}
     for rkey, cut in range_defs.items():
-        evts = [e for e in combined if e.get("ts", 0) >= cut]
+        evts = [e for e in combined if _safe_float(e.get("ts", 0)) >= cut]
         ranges[rkey] = {
             **summarize(evts),
             **_aggregate(evts),
@@ -235,7 +268,11 @@ def build_stats(
         }
 
     if custom_start is not None and custom_end is not None:
-        evts = [e for e in combined if custom_start <= e.get("ts", 0) < custom_end]
+        evts = [
+            e
+            for e in combined
+            if custom_start <= _safe_float(e.get("ts", 0)) < custom_end
+        ]
         ranges["custom"] = {
             **summarize(evts),
             **_aggregate(evts),
@@ -251,15 +288,15 @@ def build_stats(
 
     for e in combined:
         etype = e.get("type", "")
-        ts = e.get("ts", 0)
+        ts = _safe_float(e.get("ts", 0))
         day = _day_key(ts)
         slot = timeline.setdefault(
             day, {"date": day, "success": 0, "cache_hit": 0, "error": 0}
         )
         if etype in slot:
             slot[etype] += 1
-        chars_in += int(e.get("input_chars", 0))
-        chars_out += int(e.get("output_chars", 0))
+        chars_in += _safe_int(e.get("input_chars", 0))
+        chars_out += _safe_int(e.get("output_chars", 0))
 
     days = sorted(timeline.keys())
     filled: list[dict] = []
@@ -297,11 +334,11 @@ def build_stats(
         for e in reversed(events[-20:])
     ]
 
-    session_events = [e for e in events if e.get("ts", 0) >= SESSION_START]
+    session_events = [e for e in events if _safe_float(e.get("ts", 0)) >= SESSION_START]
 
     session_slots: dict[int, dict] = {}
     for e in session_events:
-        h = int(e.get("ts", 0) // 3600) * 3600
+        h = int(_safe_float(e.get("ts", 0)) // 3600) * 3600
         slot = session_slots.setdefault(h, {"success": 0, "cache_hit": 0, "error": 0})
         etype = e.get("type", "")
         if etype in slot:

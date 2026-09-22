@@ -255,6 +255,18 @@ class TestMarkdownGuard:
         assert markdown_guard.has_markdown("https://example.com")
         assert not markdown_guard.has_markdown("plain text 123")
 
+    def test_without_fenced_blocks_strips_code(self):
+        text = "Hello\n```python\nprint('x')\n```\nDone"
+        assert markdown_guard.without_fenced_blocks(text) == "Hello\n\nDone"
+
+    def test_without_fenced_blocks_keeps_plain_text(self):
+        text = "Просто текст без кода."
+        assert markdown_guard.without_fenced_blocks(text) == text
+
+    def test_without_fenced_blocks_keeps_inline_code(self):
+        text = "Use `x` here."
+        assert markdown_guard.without_fenced_blocks(text) == text
+
     def test_placeholder_separated_from_neighbours(self):
         masked = markdown_guard.mask_markdown("x*a*y")
         assert f"x {masked.placeholder(0)} a" in masked.text
@@ -293,3 +305,63 @@ class TestMarkdownGuard:
         assert masked.text.count(masked.placeholder(0)) == 1
         restored = markdown_guard.restore_markdown(masked.text, masked)
         assert restored == "*Она ушла.*"
+
+
+class TestMarkdownGuardFenced:
+    TRANSLATE_CASES = [
+        "```\nHello world\n```",
+        "Before ```python\nprint('hi')\n``` after",
+        "```\nline one\nline two\n```",
+        "```python\n```",
+        "````js\ntext\ntext2\n````",
+    ]
+
+    def test_roundtrip_is_exact(self):
+        for text in self.TRANSLATE_CASES:
+            masked = markdown_guard.mask_markdown(text, translate_fenced=True)
+            assert markdown_guard.restore_markdown(masked.text, masked) == text
+
+    def test_content_visible_but_fences_masked(self):
+        text = "```\nHello world\n```"
+        masked = markdown_guard.mask_markdown(text, translate_fenced=True)
+        assert "Hello world" in masked.text
+        assert "```" not in masked.text
+        assert masked.tokens == ["```", "```"]
+
+    def test_lang_tag_kept_separately(self):
+        text = "```python\nx = 1\n```"
+        masked = markdown_guard.mask_markdown(text, translate_fenced=True)
+        assert "```python" in masked.tokens
+        assert "x = 1" in masked.text
+
+    def test_default_off_masks_whole_block(self):
+        text = "```\nHello world\n```"
+        masked = markdown_guard.mask_markdown(text)
+        assert "Hello world" not in masked.text
+        assert len(masked.tokens) == 1
+
+    def test_inline_code_inside_fence_still_masked(self):
+        text = "```\n`inline` and *em*\n```"
+        masked = markdown_guard.mask_markdown(text, translate_fenced=True)
+        assert "`inline`" not in masked.text
+        assert "*em*" not in masked.text
+
+    def test_missing_placeholders_detected(self):
+        masked = markdown_guard.mask_markdown(
+            "a ```\ncontent\n``` b", translate_fenced=True
+        )
+        broken = masked.text.replace(masked.placeholder(0), "")
+        assert 0 in markdown_guard.missing_placeholders(broken, masked)
+
+    def test_instruction_mentions_fenced_content(self):
+        masked = markdown_guard.mask_markdown(
+            "```\ncontent\n```", translate_fenced=True
+        )
+        instr = markdown_guard.markdown_instruction(masked, translate_fenced=True)
+        assert masked.placeholder(0) in instr
+        assert "блоки кода" in instr
+
+    def test_instruction_plain_when_off(self):
+        masked = markdown_guard.mask_markdown("```\ncontent\n```")
+        instr = markdown_guard.markdown_instruction(masked)
+        assert "блоки кода" not in instr

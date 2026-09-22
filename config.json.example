@@ -31,6 +31,7 @@
   "libretranslate_url": "https://libretranslate.com/translate",
   "libretranslate_api_key": "",
   "preserve_markdown": true,
+  "translate_fenced_code": true,
   "log_translation_content": false,
   "log_level": "INFO"
 }

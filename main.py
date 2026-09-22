@@ -65,7 +65,13 @@ async def translate(request: Request):
     content_type = (request.headers.get("content-type") or "").lower()
 
     if "application/json" in content_type:
-        raw: Any = await request.json()
+        try:
+            raw: Any = await request.json()
+        except Exception as e:
+            logger.warning("Failed to parse JSON body: %s", e)
+            raise HTTPException(400, detail="Invalid JSON body")
+        if not isinstance(raw, dict):
+            raise HTTPException(400, detail="JSON body must be an object")
     else:
         try:
             raw = await request.form()
@@ -138,9 +144,14 @@ async def invalidate_cache_entry(hash_key: str):
     return {"detail": "Cache entry invalidated"}
 
 
-@app.get("/stats")
-async def stats_page():
-    return FileResponse(os.path.join(static_dir, "stats.html"))
+static_dir = os.path.join(os.path.dirname(__file__), "static")
+
+
+if os.path.isdir(static_dir):
+
+    @app.get("/stats")
+    async def stats_page():
+        return FileResponse(os.path.join(static_dir, "stats.html"))
 
 
 @app.get("/stats/api")
@@ -149,10 +160,12 @@ async def stats_api(
     to_date: str | None = Query(None, alias="to"),
 ):
     custom_start = custom_end = None
-    if from_date or to_date:
+    if bool(from_date) != bool(to_date):
+        raise HTTPException(400, detail="Both 'from' and 'to' are required together")
+    if from_date and to_date:
         try:
-            d1 = datetime.date.fromisoformat(from_date or "")
-            d2 = datetime.date.fromisoformat(to_date or "")
+            d1 = datetime.date.fromisoformat(from_date)
+            d2 = datetime.date.fromisoformat(to_date)
         except ValueError:
             raise HTTPException(400, detail="Dates must be in YYYY-MM-DD format")
         if d1 > d2:
@@ -164,7 +177,6 @@ async def stats_api(
     return stats_manager.build_stats(custom_start=custom_start, custom_end=custom_end)
 
 
-static_dir = os.path.join(os.path.dirname(__file__), "static")
 if os.path.isdir(static_dir):
     app.mount("/static", StaticFiles(directory=static_dir), name="static")
 

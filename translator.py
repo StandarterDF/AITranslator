@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 
 TRANSLATION_TIMEOUT = 30
 
-URL_PATTERN = re.compile(r'https?://[^\s<>"\'\]\[\)\(]+')
+URL_PATTERN = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
 
 
 def restore_urls(original: str, translation: str) -> str:
@@ -37,7 +37,7 @@ def restore_urls(original: str, translation: str) -> str:
         return translation
 
     result = translation
-    for i, trans_url, _ in reversed(pairs):
+    for i, trans_url, _ in sorted(pairs, key=lambda p: len(p[1]), reverse=True):
         placeholder = f"\x00URL_{i}\x00"
         result = result.replace(trans_url, placeholder, 1)
 
@@ -120,12 +120,34 @@ def _mask_if_needed(text: str) -> markdown_guard.MaskedText | None:
     """Mask Markdown constructs, unless preservation is disabled or none found."""
     if not config.PRESERVE_MARKDOWN or not markdown_guard.has_markdown(text):
         return None
-    return markdown_guard.mask_markdown(text)
+    return markdown_guard.mask_markdown(
+        text, translate_fenced=config.TRANSLATE_FENCED_CODE
+    )
+
+
+def _validation_text(content: str) -> str:
+    """Text used for target-language validation.
+
+    Code inside fenced blocks is not expected to be in the target script
+    (identifiers, strings, or verbatim-preserved blocks), so it is stripped
+    before checking that the surrounding prose was translated.
+    """
+    if not config.PRESERVE_MARKDOWN:
+        return content
+    return markdown_guard.without_fenced_blocks(content)
 
 
 class LLMTranslator:
     def __init__(self, provider_name: str | None = None):
-        self.chain = getattr(config, "TRANSLATION_CHAIN", self._default_chain())
+        if provider_name:
+            if provider_name not in config.PROVIDERS:
+                raise ValueError(
+                    f"Unknown provider '{provider_name}'. "
+                    f"Available: {list(config.PROVIDERS.keys())}"
+                )
+            config.DEFAULT_PROVIDER = provider_name
+        self.default_provider = config.DEFAULT_PROVIDER
+        self.chain = config.TRANSLATION_CHAIN or self._default_chain()
         self._llm_clients: dict[str, AsyncClient] = {}
         self._validate_chain()
         self.prompt_tokens: int = 0
@@ -205,7 +227,7 @@ class LLMTranslator:
         return new_effort
 
     async def translate(self, text: str, source: str, target: str) -> dict:
-        source_lang = source if source != "auto" else source
+        source_lang = source
         target_lang = target
 
         req_start = time.monotonic()
@@ -359,14 +381,15 @@ class LLMTranslator:
                 provider_name,
                 client,
                 model,
-                cfg,
             )
 
         masked = _mask_if_needed(text)
         parts = format_prompt(source, target, masked.text if masked else text)
         user_content = parts["user"]
         if masked:
-            user_content += markdown_guard.markdown_instruction(masked)
+            user_content += markdown_guard.markdown_instruction(
+                masked, translate_fenced=config.TRANSLATE_FENCED_CODE
+            )
         messages: list[dict[str, str]] = [
             {"role": "system", "content": parts["system"]},
             {"role": "user", "content": user_content},
@@ -480,7 +503,7 @@ class LLMTranslator:
                     "Markdown placeholders missing after LLM step: %s", missing
                 )
 
-        if not validate_translation(content, target):
+        if not validate_translation(_validation_text(content), target):
             logger.warning(
                 "Validation raw content (after strip): %r",
                 content[:2000],
@@ -500,13 +523,18 @@ class LLMTranslator:
         provider_name: str,
         client,
         model: str,
-        cfg: dict,
     ) -> str:
         source_name = LANGUAGE_NAMES.get(source, source)
         target_name = LANGUAGE_NAMES.get(target, target)
 
         masked = _mask_if_needed(text)
-        instruction = markdown_guard.markdown_instruction(masked) if masked else ""
+        instruction = (
+            markdown_guard.markdown_instruction(
+                masked, translate_fenced=config.TRANSLATE_FENCED_CODE
+            )
+            if masked
+            else ""
+        )
         prompt = (
             f"<|channel|>user\n"
             f"Переведи следующий текст с {source_name} на {target_name}:\n\n"
@@ -585,7 +613,7 @@ class LLMTranslator:
                     missing,
                 )
 
-        if not validate_translation(content, target):
+        if not validate_translation(_validation_text(content), target):
             logger.warning(
                 "Validation raw content (after strip): %r",
                 content[:2000],

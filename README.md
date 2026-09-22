@@ -67,12 +67,15 @@ curl -X POST http://localhost:5555/translate \
 |---|---|
 | `main.py` | FastAPI app, routes, uvicorn launcher |
 | `static/index.html` | Web UI — Google Translate-style translation interface |
-| `tui.py` | TUI — Textual-based terminal translation interface |
+| `static/stats.html` | Stats dashboard (period-scoped charts) |
+| `tui.py` | TUI — Textual-based server console (logs + status) |
 | `translator.py` | `LLMTranslator` — fallback chain execution |
 | `config.py` | Config loader (.env keys + config.json parsing) |
 | `prompt_template.py` | Dynamic system/user prompt templates (any language pair) |
 | `validator.py` | Script-based language validation (≥50% target script) |
+| `markdown_guard.py` | Deterministic Markdown masking/restoration |
 | `cache_manager.py` | SHA256 JSON cache in `cache/` directory |
+| `stats_manager.py` | JSONL event log + aggregated stats |
 
 ## ⚙️ Configuration
 
@@ -113,6 +116,8 @@ LIBRETRANSLATE_API_KEY=
   ],
   "libretranslate_url": "https://libretranslate.com/translate",
   "libretranslate_api_key": "",
+  "preserve_markdown": true,
+  "translate_fenced_code": true,
   "log_translation_content": false,
   "log_level": "INFO"
 }
@@ -126,7 +131,9 @@ LIBRETRANSLATE_API_KEY=
 
 Ready-made minimal templates are in `configs/` (deepseek, localllm, deepseek+fallback). Copy the one you need to `config.json`.
 
-- `log_level` — уровень логирования корневого логгера: `DEBUG`, `INFO` (по умолчанию), `WARNING`, `ERROR`. `DEBUG` включает подробные логи (полные тела запросов openai-клиента, connection-детали httpcore).
+- `log_level` — root logger level: `DEBUG`, `INFO` (default), `WARNING`, `ERROR`. `DEBUG` enables verbose logs (full openai-client request bodies, httpcore connection details).
+- `preserve_markdown` (default `true`) — mask Markdown constructs (emphasis, inline code, HTML tags, links) with placeholders before sending to the model, restore them afterwards.
+- `translate_fenced_code` (default `true`) — translate the text inside ``` ``` blocks (only the fence delimiters are masked). `false` masks the whole block verbatim.
 
 ### Reasoning effort
 
@@ -158,7 +165,7 @@ Defined in `config.json` as `translation_chain`. Each step is tried in order:
 Browser-based translation interface (Google Translate style) at the root URL.
 
 - `http://localhost:5555/` — two-panel UI with source/target language selectors, auto-translate with 2.5s debounce, swap button, copy to clipboard
-- Supports all 35 languages from the validation list (auto-detect for source)
+- Supports every language in the validation list (auto-detect for source)
 - 🌞 Light theme and 🌙 dark theme
 - Served from `static/index.html`
 
@@ -168,18 +175,17 @@ Browser-based translation interface (Google Translate style) at the root URL.
 
 ## 🖥 TUI
 
-Terminal-based translation interface (Textual) — a full-featured TUI for quick translations without leaving the terminal.
+Textual-based server console — runs the FastAPI server in a background thread and streams its logs.
 
-- `python tui.py` — launches the TUI with a translation panel, log viewer, and status bar
-- Two-panel layout: source input (top) and translation output (bottom)
-- Live server log stream in a dedicated panel
+- `python tui.py` — launches the TUI: live log viewer, status panel (config, chain, reasoning, port, session counters) and status bar
+- Starts the FastAPI server automatically and restarts it on demand
 - Keyboard-driven workflow:
-  - `Tab` — cycle focus between panels
-  - `Ctrl+T` — swap source/target languages
-  - `Ctrl+C` — copy translation result
-  - `Ctrl+Q` — quit
-- TUI automatically starts the FastAPI server as a subprocess if not already running
-- Serves as a standalone alternative to the Web UI — useful for server administration or headless environments
+  - `F2` — cycle reasoning effort for the default provider (`low` → `high` → `max` → `off`)
+  - `F3` — restart the server
+  - `F5` — clear the log
+  - `F6` — copy the log to clipboard
+  - `Ctrl+C` — quit (stops the server)
+- Useful for server administration or headless environments
 
 | TUI main screen |
 |---|
@@ -195,6 +201,9 @@ Terminal-based translation interface (Textual) — a full-featured TUI for quick
 | 🔵 `GET` | `/cache` | List cache entries |
 | 🔴 `DELETE` | `/cache/{hash_key}` | Delete single cache entry |
 | 🟡 `POST` | `/cache/{hash_key}/invalidate` | Invalidate cache entry |
+| 📊 `GET` | `/stats` | Stats dashboard (HTML) |
+| 📊 `GET` | `/stats/api` | Aggregated stats JSON (`from`, `to` optional, YYYY-MM-DD) |
+| 📁 `GET` | `/static/*` | Static assets |
 
 ## ✅ Validation
 
@@ -216,6 +225,7 @@ Falls through (always valid) for unsupported languages.
 ```
 fastapi    uvicorn    openai
 pydantic   httpx      python-dotenv
+textual    pytest
 ```
 
 ---
@@ -349,6 +359,8 @@ LIBRETRANSLATE_API_KEY=
 Готовые минимальные шаблоны лежат в `configs/` (deepseek, localllm, deepseek+fallback). Скопируйте нужный в `config.json`.
 
 - `log_level` — уровень логирования корневого логгера: `DEBUG`, `INFO` (по умолчанию), `WARNING`, `ERROR`. `DEBUG` включает подробные логи (полные тела запросов openai-клиента, connection-детали httpcore).
+- `preserve_markdown` (по умолчанию `true`) — маскировать Markdown-разметку (выделение, инлайн-код, HTML-теги, ссылки) плейсхолдерами до отправки в модель и восстанавливать после.
+- `translate_fenced_code` (по умолчанию `true`) — переводить текст внутри блоков ``` ``` (маскируются только сами разделители). `false` — маскировать блок целиком.
 
 ### Режим мышления (reasoning effort)
 
@@ -380,7 +392,7 @@ LIBRETRANSLATE_API_KEY=
 Интерфейс перевода в браузере (в стиле Google Translate) по корневому URL.
 
 - `http://localhost:5555/` — двухпанельный интерфейс с выбором исходного/целевого языка, авто-перевод с задержкой 2.5с, кнопка смены языков, копирование в буфер
-- Поддерживает все 35 языков из списка валидации (авто-определение для исходного)
+- Поддерживает все языки из списка валидации (авто-определение для исходного)
 - 🌞 Светлая тема и 🌙 тёмная тема
 - Файлы в `static/index.html`
 
@@ -390,18 +402,17 @@ LIBRETRANSLATE_API_KEY=
 
 ## 🖥 TUI
 
-Терминальный интерфейс перевода на базе Textual — полнофункциональный TUI для быстрых переводов без выхода в браузер.
+Терминальная консоль сервера на базе Textual — запускает FastAPI сервер в фоновом потоке и транслирует его логи.
 
-- `python tui.py` — запускает TUI с панелью перевода, лог-вьювером и статус-баром
-- Двухпанельная раскладка: ввод исходного текста (сверху) и результат перевода (снизу)
-- Прямая трансляция логов сервера в отдельной панели
+- `python tui.py` — запускает TUI: живой лог, панель статуса (конфиг, цепочка, режим мышления, порт, счётчики сессии) и статус-бар
+- Автоматически запускает FastAPI сервер и перезапускает его по команде
 - Управление с клавиатуры:
-  - `Tab` — циклическое переключение фокуса между панелями
-  - `Ctrl+T` — смена языков местами
-  - `Ctrl+C` — копирование результата перевода
-  - `Ctrl+Q` — выход
-- TUI автоматически запускает FastAPI сервер как подпроцесс
-- Полноценная альтернатива Web UI — удобно для администрирования сервера или окружений без браузера
+  - `F2` — циклическое переключение режима мышления для провайдера по умолчанию (`low` → `high` → `max` → `off`)
+  - `F3` — перезапуск сервера
+  - `F5` — очистка лога
+  - `F6` — копирование лога в буфер обмена
+  - `Ctrl+C` — выход (останавливает сервер)
+- Удобно для администрирования сервера или окружений без браузера
 
 | Главный экран TUI |
 |---|
@@ -417,6 +428,9 @@ LIBRETRANSLATE_API_KEY=
 | 🔵 `GET` | `/cache` | Список записей кэша |
 | 🔴 `DELETE` | `/cache/{hash_key}` | Удалить одну запись кэша |
 | 🟡 `POST` | `/cache/{hash_key}/invalidate` | Инвалидировать запись кэша |
+| 📊 `GET` | `/stats` | Дашборд статистики (HTML) |
+| 📊 `GET` | `/stats/api` | JSON агрегированной статистики (`from`, `to` — опционально, YYYY-MM-DD) |
+| 📁 `GET` | `/static/*` | Статические файлы |
 
 ## ✅ Валидация
 
@@ -438,4 +452,5 @@ LIBRETRANSLATE_API_KEY=
 ```
 fastapi    uvicorn    openai
 pydantic   httpx      python-dotenv
+textual    pytest
 ```

@@ -172,6 +172,12 @@ LOG_TRANSLATION_CONTENT: bool = _parse_log_translation_content(
 # Markdown preservation (mask markers before LLM, restore after)
 PRESERVE_MARKDOWN: bool = _parse_bool(raw.get("preserve_markdown"), default=True)
 
+# Translate the text inside fenced code blocks (``` ```): only the fence
+# delimiters are masked, the block content stays visible to the translator.
+TRANSLATE_FENCED_CODE: bool = _parse_bool(
+    raw.get("translate_fenced_code"), default=True
+)
+
 
 def _parse_log_level(value) -> str:
     """Parse log_level value. Returns uppercase string or 'INFO' on invalid input."""
@@ -202,7 +208,11 @@ def _load_reasoning_state() -> dict:
     try:
         data = json.loads(REASONING_STATE_FILE.read_text("utf-8"))
         state = data.get("reasoning_effort", {}) if isinstance(data, dict) else {}
-        return {k: v for k, v in state.items() if isinstance(v, (str, type(None)))}
+        return {
+            k: (_parse_reasoning_effort(v) if isinstance(v, str) else v)
+            for k, v in state.items()
+            if isinstance(v, (str, type(None)))
+        }
     except (OSError, ValueError):
         return {}
 

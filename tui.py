@@ -105,13 +105,10 @@ class ServerProcess:
 
     def _run(self):
         import uvicorn
-        from translator import LLMTranslator
-
-        self.translator = LLMTranslator()
 
         import main as main_module
 
-        main_module.translator = self.translator
+        self.translator = main_module.translator
 
         uvicorn_cfg = uvicorn.Config(
             "main:app",
