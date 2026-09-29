@@ -2,6 +2,10 @@ services:
   translator:
     build: .
     image: ailibretranslater:local
+    # This image is built here and never published. Without this, compose tries
+    # to pull `ailibretranslater:local` from docker.io first and warns about
+    # denied access.
+    pull_policy: build
     container_name: ailibretranslater
     # Write cache/ and stats/ as yourself, otherwise the files end up owned by
     # root and a local `venv/bin/python main.py` can no longer write to them.
