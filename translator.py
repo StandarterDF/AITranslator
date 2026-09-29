@@ -1,6 +1,7 @@
 import logging
 import re
 import time
+from collections import Counter
 
 import httpx
 from openai import AsyncClient
@@ -15,6 +16,13 @@ from validator import validate_translation
 logger = logging.getLogger(__name__)
 
 TRANSLATION_TIMEOUT = 30
+
+# Version of the translation pipeline, stamped into every cache entry.
+# Bump it whenever a change makes translations produced by the previous code
+# suspect — a rewritten prompt, a different model, a new mask rule.  A bump
+# alone never re-translates: cached entries are only redone when the static
+# check in `_cached_defect` says they are wrong (see translate()).
+TRANSLATOR_VERSION = 1
 
 URL_PATTERN = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
 
@@ -137,6 +145,69 @@ def _validation_text(content: str) -> str:
     return markdown_guard.without_fenced_blocks(content)
 
 
+def _log_missing_markers(masked: markdown_guard.MaskedText, missing: list[int]):
+    """Report dropped placeholders, split by how much damage they do.
+
+    A lost structural marker (heading, rule, quote, link bracket) means the
+    translation lost document structure; a lost inline marker (emphasis, code,
+    tag, URL) is only a formatting blemish.
+    """
+    if not missing:
+        return
+    structure = [i for i in missing if masked.is_structural(i)]
+    inline = [i for i in missing if not masked.is_structural(i)]
+    if structure:
+        logger.warning(
+            "Markdown structure markers lost by the model: %s "
+            "(headings, rules, quotes, link/image brackets)",
+            structure,
+        )
+    if inline:
+        logger.warning(
+            "Markdown inline markers lost by the model: %s "
+            "(emphasis, code, tags, urls)",
+            inline,
+        )
+
+
+def cached_defect(source: str, cached: str, target: str) -> str | None:
+    """Static check of a cached translation.  Returns why it is unusable, or None.
+
+    Deterministic, no model and no network involved, so it can be re-run on
+    every cache hit:
+
+    1. the translation must carry every Markdown marker the source has.  Both
+       texts are masked with the same rules and the two marker inventories are
+       compared, so a translation that lost ``*``, ``**``, ``---`` or ``##`` on
+       the way out is rejected — comparing against the source rather than
+       guessing what the model would keep.  Markers the translation *gained*
+       are ignored: the check is one-directional;
+    2. the translation must be in the target script.
+
+    A stored translation has already been restored, so its markers are back in
+    place; that is exactly why the comparison is mask-vs-mask and not a search
+    for placeholders.
+    """
+    if config.PRESERVE_MARKDOWN:
+        translate_fenced = config.TRANSLATE_FENCED_CODE
+        wanted = markdown_guard.mask_markdown(
+            source, translate_fenced=translate_fenced
+        ).tokens
+        if wanted:
+            have = markdown_guard.mask_markdown(
+                cached, translate_fenced=translate_fenced
+            ).tokens
+            missing = Counter(wanted) - Counter(have)
+            if missing:
+                lost = ", ".join(
+                    f"{token!r}x{count}" for token, count in sorted(missing.items())
+                )
+                return f"lost Markdown marker(s): {lost}"
+    if not validate_translation(_validation_text(cached), target):
+        return f"not in target language ({target})"
+    return None
+
+
 class LLMTranslator:
     def __init__(self, provider_name: str | None = None):
         if provider_name:
@@ -154,7 +225,11 @@ class LLMTranslator:
         self.completion_tokens: int = 0
         self.translations: int = 0
         self.cached: int = 0
+        self.stale: int = 0
         self.errors: int = 0
+        # Cache keys already re-translated in this process, so a translation
+        # that fails the static check on every attempt is not paid for twice.
+        self._refreshed: set[str] = set()
         self.reasoning_effort: dict[str, str | None] = {
             p: config.get_reasoning_effort(p) for p in config.PROVIDERS
         }
@@ -234,21 +309,80 @@ class LLMTranslator:
         tokens_before = (self.prompt_tokens, self.completion_tokens)
         key = cache_manager.cache_key(source_lang, target_lang, text)
 
-        cached = cache_manager.get_cache(source_lang, target_lang, text)
-        if cached is not None:
-            self.cached += 1
-            logger.info("Using cached translation")
+        entry = cache_manager.get_entry(source_lang, target_lang, text)
+        if entry is not None:
+            cached = entry.get("translated_text", "")
+            defect = cached_defect(text, cached, target_lang)
+            stored = cache_manager.get_version(entry)
+
+            if defect is None:
+                # Still good.  Adopt the current version if the entry predates
+                # it — no re-translation, just a fresh stamp.
+                self.cached += 1
+                if cache_manager.set_version(key, TRANSLATOR_VERSION):
+                    logger.info(
+                        "Cached translation %s (was v%d) adopted v%d",
+                        key[:12],
+                        stored,
+                        TRANSLATOR_VERSION,
+                    )
+                logger.info("Using cached translation")
+                stats_manager.log_event(
+                    "cache_hit",
+                    hash_key=key,
+                    source=source_lang,
+                    target=target_lang,
+                    version=TRANSLATOR_VERSION,
+                    latency_s=time.monotonic() - req_start,
+                    input_chars=len(text),
+                    preview=text[:80],
+                )
+                return {"translatedText": restore_urls(text, cached)}
+
+            if key in self._refreshed:
+                # Already re-translated once this run and the new one failed the
+                # same check — serve the cache instead of paying again.
+                self.cached += 1
+                logger.warning(
+                    "Cached translation %s still defective (%s) after a "
+                    "refresh — serving it",
+                    key[:12],
+                    defect,
+                )
+                stats_manager.log_event(
+                    "cache_defect",
+                    hash_key=key,
+                    source=source_lang,
+                    target=target_lang,
+                    version=stored,
+                    latency_s=time.monotonic() - req_start,
+                    input_chars=len(text),
+                    preview=text[:80],
+                    error=defect,
+                )
+                return {"translatedText": restore_urls(text, cached)}
+
+            self._refreshed.add(key)
+            self.stale += 1
+            logger.info(
+                "Cached translation %s rejected — %s (made by v%d, running v%d)",
+                key[:12],
+                defect,
+                stored,
+                TRANSLATOR_VERSION,
+            )
             stats_manager.log_event(
-                "cache_hit",
+                "cache_stale",
                 hash_key=key,
                 source=source_lang,
                 target=target_lang,
+                version=stored,
                 latency_s=time.monotonic() - req_start,
                 input_chars=len(text),
                 preview=text[:80],
+                error=defect,
             )
-            cached = restore_urls(text, cached)
-            return {"translatedText": cached}
+            cache_manager.invalidate_cache(key)
 
         if not self.chain:
             raise TranslationError("TRANSLATION_CHAIN is empty", 500)
@@ -297,7 +431,9 @@ class LLMTranslator:
                     )
                     if config.LOG_TRANSLATION_CONTENT:
                         logger.info("Content: %s", clean)
-                    cache_manager.set_cache(source_lang, target_lang, text, clean)
+                    cache_manager.set_cache(
+                        source_lang, target_lang, text, clean, TRANSLATOR_VERSION
+                    )
                     stats_manager.log_event(
                         "success",
                         hash_key=key,
@@ -305,6 +441,7 @@ class LLMTranslator:
                         target=target_lang,
                         step=label,
                         steps_failed=failed_labels or None,
+                        version=TRANSLATOR_VERSION,
                         latency_s=time.monotonic() - req_start,
                         input_chars=len(text),
                         output_chars=len(clean),
@@ -498,10 +635,7 @@ class LLMTranslator:
         if masked:
             missing = markdown_guard.missing_placeholders(content, masked)
             content = markdown_guard.restore_markdown(content, masked)
-            if missing:
-                logger.warning(
-                    "Markdown placeholders missing after LLM step: %s", missing
-                )
+            _log_missing_markers(masked, missing)
 
         if not validate_translation(_validation_text(content), target):
             logger.warning(
@@ -607,11 +741,7 @@ class LLMTranslator:
         if masked:
             missing = markdown_guard.missing_placeholders(content, masked)
             content = markdown_guard.restore_markdown(content, masked)
-            if missing:
-                logger.warning(
-                    "Markdown placeholders missing after completions step: %s",
-                    missing,
-                )
+            _log_missing_markers(masked, missing)
 
         if not validate_translation(_validation_text(content), target):
             logger.warning(

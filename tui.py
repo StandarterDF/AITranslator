@@ -50,6 +50,7 @@ for name in ("httpx", "httpcore"):
     logging.getLogger(name).setLevel(logging.WARNING)
 
 import config as cfg
+from translator import TRANSLATOR_VERSION
 
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
@@ -271,6 +272,7 @@ class TranslatorTUI(App):
         super().__init__()
         self.translations = 0
         self.cached = 0
+        self.stale = 0
         self.errors = 0
         self.prompt_tokens = 0
         self.completion_tokens = 0
@@ -323,6 +325,7 @@ class TranslatorTUI(App):
             self.completion_tokens = t.completion_tokens
             self.translations = t.translations
             self.cached = t.cached
+            self.stale = t.stale
             self.errors = t.errors
 
     def _write_log(self, log: RichLog, msg: str):
@@ -401,9 +404,11 @@ class TranslatorTUI(App):
                 f"[bold]Config:[/bold]     [#44bbdd]{cfg_label}[/#44bbdd]\n"
                 f"[bold]Chain:[/bold]        [#44bbdd]{chain_info}[/#44bbdd]\n"
                 f"[bold]Reasoning:[/bold]    [#ffaa33]{effort_str}[/#ffaa33]  [dim](F2)[/dim]\n"
+                f"[bold]Pipeline v:[/bold]   [#44bbdd]{TRANSLATOR_VERSION}[/#44bbdd]  [dim](cache stamp)[/dim]\n"
                 f"[bold]Port:[/bold]         [#ffaa33]5555[/#ffaa33]\n"
                 f"[bold]Translations:[/bold] [#33aa33]{self.translations}[/#33aa33]  [dim](session)[/dim]\n"
                 f"[bold]Cached:[/bold]       [#44bbdd]{self.cached}[/#44bbdd]  [dim](from cache)[/dim]\n"
+                f"[bold]Stale:[/bold]        [#ffaa33]{self.stale}[/#ffaa33]  [dim](cache rejected, re-translated)[/dim]\n"
                 f"[bold]Errors:[/bold]       [#cc3333]{self.errors}[/#cc3333]  [dim](session)[/dim]\n"
                 f"[bold]Prompt tokens:[/bold] [#ffaa33]{self.prompt_tokens}[/#ffaa33]\n"
                 f"[bold]Output tokens:[/bold] [#44bbdd]{self.completion_tokens}[/#44bbdd]\n"

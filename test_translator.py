@@ -1,7 +1,14 @@
-import pytest
-from unittest.mock import patch, MagicMock
+﻿import asyncio
+import json
 
+import pytest
+from unittest.mock import patch, AsyncMock, MagicMock
+
+import cache_manager
+import config
 import markdown_guard
+import stats_manager
+import translator
 from validator import validate_translation, LANGUAGE_SCRIPTS
 from cache_manager import _cache_key
 
@@ -365,3 +372,459 @@ class TestMarkdownGuardFenced:
         masked = markdown_guard.mask_markdown("```\ncontent\n```")
         instr = markdown_guard.markdown_instruction(masked)
         assert "блоки кода" not in instr
+
+
+class TestMarkdownGuardBlocks:
+    """Block-level constructs: heading markers, rules, quotes, hard breaks,
+    link brackets.  These are invisible to the model unless masked, and the
+    model deletes them."""
+
+    ROUNDTRIP_CASES = [
+        "## Someone Real\n**Westholm Library - Day 731**\n\n---\n\nSalt wind.\n",
+        "### Title ###\ntext\n",
+        "# one\n## two\n### three\n#### four\n##### five\n###### six\n",
+        "## \n",
+        "##\n",
+        "Title\n===\nbody\n",
+        "Title\n---\nbody\n",
+        "a\n---\nb\n***\nc\n___\nd\n- - -\ne\n_____\n======\n",
+        "> quote\n>> deep\n>not spaced\n",
+        "line one  \nline two\n",
+        "line one  \r\nline two\r\n",
+        "before\n─────── ───\nafter\n",
+        "before\n═══════\nafter\n",
+        '[label](https://e.com) and ![alt](img.png "t")\n',
+        "## [a](b) heading with link\n",
+        "```\n## not a heading\n---\n  \n```\n# real\n",
+        "text ~~~\nmore\n",
+        "#NoSpace\n####### seven\ntext\n",
+        "*emphasis* not a list\n",
+        "[Timeline: lone bracket] and (parens)\n",
+        "a\n   \nb\n",
+        "line  \n",
+        "trailing spaces at eof  ",
+    ]
+
+    def test_roundtrip_is_exact(self):
+        for text in self.ROUNDTRIP_CASES:
+            for translate_fenced in (False, True):
+                masked = markdown_guard.mask_markdown(
+                    text, translate_fenced=translate_fenced
+                )
+                assert markdown_guard.restore_markdown(masked.text, masked) == text, (
+                    f"round-trip failed for {text!r}"
+                )
+
+    def test_heading_marker_masked_text_visible(self):
+        masked = markdown_guard.mask_markdown("## Someone Real\ntext\n")
+        assert "##" not in masked.text
+        assert "Someone Real" in masked.text
+        assert masked.tokens[0] == "## "
+
+    def test_heading_closing_run_masked(self):
+        masked = markdown_guard.mask_markdown("### Title ###\n")
+        assert "###" not in masked.text
+        assert "Title" in masked.text
+        assert masked.tokens == ["### ", " ###"]
+
+    def test_seven_hashes_not_a_heading(self):
+        masked = markdown_guard.mask_markdown("####### seven\n")
+        assert masked.tokens == []
+
+    def test_no_space_heading_untouched(self):
+        masked = markdown_guard.mask_markdown("#NoSpace\n")
+        assert masked.tokens == []
+
+    def test_rule_line_masked_with_newline(self):
+        masked = markdown_guard.mask_markdown("a\n---\nb\n")
+        assert masked.text == f"a\n{masked.placeholder(0)}b\n"
+        assert masked.tokens == ["---\n"]
+
+    def test_box_rule_masked(self):
+        masked = markdown_guard.mask_markdown("before\n───────\nafter\n")
+        assert "─" not in masked.text
+        assert masked.tokens == ["───────\n"]
+
+    def test_quote_marker_masked(self):
+        masked = markdown_guard.mask_markdown("> quote\n")
+        assert ">" not in masked.text
+        assert "quote" in masked.text
+        assert masked.tokens == ["> "]
+
+    def test_hard_break_masked(self):
+        masked = markdown_guard.mask_markdown("line one  \nline two\n")
+        assert masked.tokens == ["  "]
+        assert "line one" in masked.text
+
+    def test_link_brackets_masked_label_visible(self):
+        masked = markdown_guard.mask_markdown("[label](https://e.com)\n")
+        assert masked.tokens == ["[", "](https://e.com)"]
+        assert "label" in masked.text
+        assert "https://e.com" not in masked.text
+
+    def test_image_brackets_masked(self):
+        masked = markdown_guard.mask_markdown("![img](a.png)\n")
+        assert masked.tokens == ["![", "](a.png)"]
+
+    def test_fence_content_is_not_block_masked(self):
+        text = "```\n## not a heading\n---\n```\n"
+        masked = markdown_guard.mask_markdown(text, translate_fenced=True)
+        assert "## not a heading" in masked.text
+        assert "---" in masked.text
+
+    def test_tokens_are_marked_structural(self):
+        masked = markdown_guard.mask_markdown(
+            "## H\n---\n> q\nline  \n[t](u)\n*em* `c`\n"
+        )
+        inline_tokens = [
+            masked.tokens[i]
+            for i in range(len(masked.tokens))
+            if not masked.is_structural(i)
+        ]
+        assert inline_tokens == ["*", "*", "`c`"]
+
+    def test_is_structural_out_of_range(self):
+        masked = markdown_guard.mask_markdown("## H\n")
+        assert masked.is_structural(len(masked.tokens)) is False
+
+    def test_has_markdown_detects_blocks_only(self):
+        assert markdown_guard.has_markdown("## H\n")
+        assert markdown_guard.has_markdown("a\n---\nb\n")
+        assert markdown_guard.has_markdown("> q\n")
+        assert markdown_guard.has_markdown("line  \nnext\n")
+        assert markdown_guard.has_markdown("───\n")
+        assert markdown_guard.has_markdown("[a](b)\n")
+        assert not markdown_guard.has_markdown("plain text 123\n")
+        assert not markdown_guard.has_markdown("#NoSpace\n")
+
+    def test_placeholder_collision_uses_other_format(self):
+        masked = markdown_guard.mask_markdown("## H {{0}} and\n---\n")
+        assert masked.open != "{{"
+        assert (
+            markdown_guard.restore_markdown(masked.text, masked)
+            == "## H {{0}} and\n---\n"
+        )
+
+    def test_missing_placeholder_reported(self):
+        masked = markdown_guard.mask_markdown("## H\ntext\n")
+        broken = masked.text.replace(masked.placeholder(0), "")
+        assert markdown_guard.missing_placeholders(broken, masked) == [0]
+
+    def test_instruction_explains_line_markers(self):
+        masked = markdown_guard.mask_markdown("## H\ntext\n")
+        instr = markdown_guard.markdown_instruction(masked)
+        assert "начале строки" in instr
+        assert "конце строки" in instr
+
+    def test_instruction_has_no_line_notes_for_inline_only(self):
+        masked = markdown_guard.mask_markdown("*em*\n")
+        instr = markdown_guard.markdown_instruction(masked)
+        assert "начале строки" not in instr
+
+    def test_url_does_not_swallow_following_marker(self):
+        # Regression: the block pass leaves {{0}} where the hard break was, and
+        # the URL pattern has no delimiter that would stop it, so the URL used
+        # to absorb the marker and the hard break was lost on restore.
+        text = "see https://e.com/p?q=1   \nnext\n"
+        masked = markdown_guard.mask_markdown(text)
+        assert "https://e.com/p?q=1" in masked.tokens
+        assert masked.tokens[0] == "   "
+        assert markdown_guard.restore_markdown(masked.text, masked) == text
+
+    def test_no_marker_is_swallowed(self):
+        text = "## H\nlink https://e.com/a_b  \n> [q](r)\n---\n"
+        masked = markdown_guard.mask_markdown(text, translate_fenced=True)
+        assert markdown_guard.missing_placeholders(masked.text, masked) == []
+        assert markdown_guard.restore_markdown(masked.text, masked) == text
+
+    @pytest.mark.parametrize("translate_fenced", [False, True])
+    def test_combinations_roundtrip(self, translate_fenced):
+        pieces = [
+            "## ",
+            "### ",
+            "#NoSpace",
+            "text ",
+            "\n",
+            "\n\n",
+            "  \n",
+            "\r\n",
+            "---\n",
+            "***\n",
+            "___\n",
+            "=== \n",
+            "─────\n",
+            "> ",
+            "1. ",
+            "*em* ",
+            "**b** ",
+            "`c` ",
+            "~~s~~ ",
+            "<!-- c -->",
+            "<div>",
+            "https://e.com/p?q=1 ",
+            "[a](b) ",
+            "![x](y) ",
+            "{{user}} ",
+            "```\n## code\n---\n```\n",
+            "Привет ",
+            "…",
+            "\u00a0",
+        ]
+        import random
+
+        rng = random.Random(20260929)
+        for _ in range(2000):
+            text = "".join(rng.choice(pieces) for _ in range(rng.randint(1, 12)))
+            masked = markdown_guard.mask_markdown(
+                text, translate_fenced=translate_fenced
+            )
+            assert markdown_guard.restore_markdown(masked.text, masked) == text
+            assert markdown_guard.missing_placeholders(masked.text, masked) == []
+
+
+class TestCachedDefect:
+    """The static check that decides whether a cached translation survives."""
+
+    SOURCE = "## Someone Real\n**Westholm Library**\n\n---\n\n*Salt wind.*\n"
+    # no trailing newline: the pipeline strips the step output before caching
+    GOOD = "## Кто-то настоящий\n**Библиотека Вестхольм**\n\n---\n\n*Солёный ветер.*"
+
+    def test_intact_translation_has_no_defect(self):
+        assert translator.cached_defect(self.SOURCE, self.GOOD, "ru") is None
+
+    def test_lost_heading_marker_is_a_defect(self):
+        broken = self.GOOD.replace("## ", "")
+        reason = translator.cached_defect(self.SOURCE, broken, "ru")
+        assert reason is not None
+        assert "## " in reason
+
+    def test_lost_rule_is_a_defect(self):
+        broken = self.GOOD.replace("\n---\n", "\n")
+        reason = translator.cached_defect(self.SOURCE, broken, "ru")
+        assert reason is not None
+        assert "---" in reason
+
+    def test_lost_emphasis_is_a_defect(self):
+        broken = self.GOOD.replace("*Солёный ветер.*", "Солёный ветер.")
+        reason = translator.cached_defect(self.SOURCE, broken, "ru")
+        assert reason is not None
+        assert "'*'x2" in reason
+
+    def test_gained_markers_are_not_a_defect(self):
+        grown = self.GOOD.replace("\n\nСолёный", "\n> Солёный")
+        assert translator.cached_defect(self.SOURCE, grown, "ru") is None
+
+    def test_rerendered_rule_is_a_defect(self):
+        rerendered = self.GOOD.replace("\n---\n", "\n***\n")
+        reason = translator.cached_defect(self.SOURCE, rerendered, "ru")
+        assert reason is not None
+
+    def test_untranslated_text_is_a_defect(self):
+        reason = translator.cached_defect(self.SOURCE, self.SOURCE, "ru")
+        assert reason is not None
+        assert "target language" in reason
+
+    def test_plain_text_source_is_only_language_checked(self):
+        source = "Just a plain sentence."
+        assert translator.cached_defect(source, "Простое предложение.", "ru") is None
+        assert translator.cached_defect(source, "Just a plain sentence.", "ru")
+
+    def test_preservation_disabled_skips_marker_check(self):
+        with patch.object(config, "PRESERVE_MARKDOWN", False):
+            broken = self.GOOD.replace("## ", "").replace("*", "")
+            assert translator.cached_defect(self.SOURCE, broken, "ru") is None
+
+
+class TestCacheVersioning:
+    """Version stamping and the reuse / re-stamp / refresh decision."""
+
+    SOURCE = TestCachedDefect.SOURCE
+    GOOD = TestCachedDefect.GOOD
+    BROKEN = "Кто-то настоящий\nБиблиотека Вестхольм\n\nСолёный ветер.\n"
+
+    @pytest.fixture
+    def env(self, tmp_path, monkeypatch):
+        """Redirect cache and stats into a tmp dir, stub out the LLM step."""
+        monkeypatch.setattr(cache_manager, "CACHE_DIR", tmp_path / "cache")
+        monkeypatch.setattr(stats_manager, "STATS_DIR", tmp_path / "stats")
+        monkeypatch.setattr(
+            stats_manager, "EVENTS_FILE", tmp_path / "stats" / "events.jsonl"
+        )
+        tr = translator.LLMTranslator()
+        tr.chain = [{"type": "llm", "provider": tr.default_provider}]
+        return tr
+
+    def _write_entry(self, tr, translated, version=None):
+        key = cache_manager.cache_key("auto", "ru", self.SOURCE)
+        data = {
+            "hash": key,
+            "source": "auto",
+            "target": "ru",
+            "source_text": self.SOURCE,
+            "translated_text": translated,
+            "created_at": 1000.0,
+            "invalid": False,
+        }
+        if version is not None:
+            data["version"] = version
+        cache_manager.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        (cache_manager.CACHE_DIR / f"{key}.json").write_text(
+            json.dumps(data, ensure_ascii=False), "utf-8"
+        )
+        return key
+
+    def _read_entry(self, key):
+        return json.loads((cache_manager.CACHE_DIR / f"{key}.json").read_text("utf-8"))
+
+    def _translate(self, tr):
+        return asyncio.run(tr.translate(self.SOURCE, "auto", "ru"))
+
+    def test_good_legacy_entry_is_stamped_and_reused(self, env):
+        key = self._write_entry(env, self.GOOD)  # no version field at all
+        with patch.object(translator.LLMTranslator, "_translate_via_llm") as llm:
+            result = self._translate(env)
+        assert result["translatedText"] == self.GOOD
+        llm.assert_not_called()
+        entry = self._read_entry(key)
+        assert entry["version"] == translator.TRANSLATOR_VERSION
+        assert entry["created_at"] == 1000.0  # ordering of /cache is preserved
+        assert env.stale == 0
+        assert env.cached == 1
+
+    def test_older_version_is_adopted_without_retranslating(self, env):
+        key = self._write_entry(env, self.GOOD, version=0)
+        with patch.object(translator.LLMTranslator, "_translate_via_llm") as llm:
+            result = self._translate(env)
+        assert result["translatedText"] == self.GOOD
+        llm.assert_not_called()
+        assert self._read_entry(key)["version"] == translator.TRANSLATOR_VERSION
+
+    def test_current_version_is_left_alone(self, env):
+        key = self._write_entry(env, self.GOOD, version=translator.TRANSLATOR_VERSION)
+        before = self._read_entry(key)
+        with patch.object(translator.LLMTranslator, "_translate_via_llm") as llm:
+            self._translate(env)
+        llm.assert_not_called()
+        assert self._read_entry(key) == before
+
+    def test_broken_entry_is_retranslated(self, env):
+        key = self._write_entry(env, self.BROKEN)
+        with patch.object(
+            translator.LLMTranslator,
+            "_translate_via_llm",
+            new=AsyncMock(return_value=self.GOOD),
+        ):
+            result = self._translate(env)
+        assert result["translatedText"] == self.GOOD
+        assert env.stale == 1
+        entry = self._read_entry(key)
+        assert entry["translated_text"] == self.GOOD
+        assert entry["version"] == translator.TRANSLATOR_VERSION
+        assert entry["invalid"] is False
+
+    def test_refreshed_translation_is_cached_normally(self, env):
+        self._write_entry(env, self.BROKEN)
+        with patch.object(
+            translator.LLMTranslator,
+            "_translate_via_llm",
+            new=AsyncMock(return_value=self.GOOD),
+        ) as llm:
+            self._translate(env)
+            second = self._translate(env)
+        assert second["translatedText"] == self.GOOD
+        assert llm.call_count == 1  # the second call came from cache
+        assert env.cached == 1
+
+    def test_broken_again_serves_cache_instead_of_paying_twice(self, env):
+        key = self._write_entry(env, self.BROKEN)
+        # first call: rejected and re-translated
+        with patch.object(
+            translator.LLMTranslator,
+            "_translate_via_llm",
+            new=AsyncMock(return_value=self.GOOD),
+        ) as llm:
+            self._translate(env)
+        assert llm.call_count == 1
+        # the fresh translation is just as broken — do not pay for it again
+        self._write_entry(env, self.BROKEN, version=translator.TRANSLATOR_VERSION)
+        with patch.object(
+            translator.LLMTranslator,
+            "_translate_via_llm",
+            new=AsyncMock(return_value=self.GOOD),
+        ) as llm2:
+            result = self._translate(env)
+        llm2.assert_not_called()
+        assert result["translatedText"] == self.BROKEN
+        assert self._read_entry(key)["translated_text"] == self.BROKEN
+
+    def test_unrelated_keys_still_refresh_after_one_key_was_served(self, env):
+        self._write_entry(env, self.BROKEN)
+        with patch.object(
+            translator.LLMTranslator,
+            "_translate_via_llm",
+            new=AsyncMock(return_value=self.GOOD),
+        ):
+            self._translate(env)
+            self._translate(env)
+        assert env.stale == 1
+
+
+class TestCacheManagerVersion:
+    def test_get_version_zero_without_field(self):
+        assert cache_manager.get_version({}) == 0
+
+    def test_get_version_reads_field(self):
+        assert cache_manager.get_version({"version": 7}) == 7
+
+    def test_get_version_rejects_junk(self):
+        assert cache_manager.get_version({"version": "3"}) == 0
+        assert cache_manager.get_version({"version": True}) == 0
+        assert cache_manager.get_version({"version": None}) == 0
+
+    def test_set_version_creates_the_field(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cache_manager, "CACHE_DIR", tmp_path / "cache")
+        cache_manager.set_cache("auto", "ru", "hi", "привет", 4)
+        key = cache_manager.cache_key("auto", "ru", "hi")
+        assert cache_manager.set_version(key, 5) is True
+        entry = cache_manager.get_entry("auto", "ru", "hi")
+        assert entry is not None
+        assert entry["version"] == 5
+        assert entry["translated_text"] == "привет"
+
+    def test_set_version_is_noop_when_current(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cache_manager, "CACHE_DIR", tmp_path / "cache")
+        cache_manager.set_cache("auto", "ru", "hi", "привет", 5)
+        key = cache_manager.cache_key("auto", "ru", "hi")
+        assert cache_manager.set_version(key, 5) is False
+
+    def test_set_version_missing_entry(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cache_manager, "CACHE_DIR", tmp_path / "cache")
+        assert cache_manager.set_version("nope", 1) is False
+
+    def test_set_version_does_not_touch_created_at(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cache_manager, "CACHE_DIR", tmp_path / "cache")
+        cache_manager.set_cache("auto", "ru", "hi", "привет", 1)
+        key = cache_manager.cache_key("auto", "ru", "hi")
+        path = cache_manager.CACHE_DIR / f"{key}.json"
+        before = json.loads(path.read_text("utf-8"))
+        cache_manager.set_version(key, 2)
+        after = json.loads(path.read_text("utf-8"))
+        assert after["created_at"] == before["created_at"]
+        assert after["version"] == 2
+
+    def test_get_entry_returns_none_for_invalid(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cache_manager, "CACHE_DIR", tmp_path / "cache")
+        cache_manager.set_cache("auto", "ru", "hi", "привет", 1)
+        key = cache_manager.cache_key("auto", "ru", "hi")
+        cache_manager.invalidate_cache(key)
+        assert cache_manager.get_entry("auto", "ru", "hi") is None
+
+    def test_list_cache_exposes_version(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cache_manager, "CACHE_DIR", tmp_path / "cache")
+        cache_manager.set_cache("auto", "ru", "hi", "привет", 9)
+        assert cache_manager.list_cache()[0]["version"] == 9
+
+    def test_get_cache_still_works(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cache_manager, "CACHE_DIR", tmp_path / "cache")
+        cache_manager.set_cache("auto", "ru", "hi", "привет", 2)
+        assert cache_manager.get_cache("auto", "ru", "hi") == "привет"

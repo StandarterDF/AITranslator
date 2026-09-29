@@ -19,10 +19,11 @@ config.py        — config loader (.env keys + config.json parsing)
 main.py          — FastAPI app + uvicorn launcher
 prompt_template.py — dynamic system/user prompt templates (any language pair)
 validator.py     — script-based language validation (≥50% target script)
-markdown_guard.py — deterministic Markdown masking/restoration
-cache_manager.py — SHA256 JSON cache in cache/
+markdown_guard.py — deterministic Markdown masking/restoration (block + inline passes)
+cache_manager.py — SHA256 JSON cache in cache/ + translator version stamps
 stats_manager.py — JSONL event log + aggregated stats
 tui.py           — Textual TUI (server console)
+temporary/       — scratch analysis scripts (gitignored, not part of the app)
 ```
 
 ## Key quirks
@@ -43,6 +44,11 @@ tui.py           — Textual TUI (server console)
 - **Output cleaning**: no regex trigger list. Each LLM branch strips a leading prefill (chat mode), and if `\n\nПеревод:` is found in the output everything before it is discarded (guards against English paraphrase). Target-language validation then decides pass/fail.
 - **`translate_fenced_code`** (config, default `true`): fenced code block delimiters (```) become placeholders but the *content between them stays visible* — so text inside ``` blocks is translated. Set `false` to mask whole blocks verbatim (old behaviour). Inline code (`` `x` ``) is always masked whole. `markdown_guard.mask_markdown(text, translate_fenced=...)` drives this; `markdown_guard.markdown_instruction(masked, translate_fenced=...)` appends a clarifying line about code-block markers.
 - **Validation skips fenced code**: `validate_translation` is run on `_validation_text` (translator.py) — `markdown_guard.without_fenced_blocks()` strips ```...``` blocks first, because code may legitimately stay in the source script (identifiers/strings). Only the surrounding prose is checked against the target language.
+- **Two mask passes** (`markdown_guard.mask_markdown`): the **block pass** runs first over the text *outside* fenced code and masks line-leading markers — ATX heading `## ` and its closing ` ###`, thematic break `---`/`***`/`___`/`- - -` (whole line incl. `\n`), setext `===`, blockquote `>`, two-space hard break, box-drawing rules `───`/`═══` (U+2500–U+257F), and the two bracket groups of `[text](url)` / `![alt](url)`. Heading text and link labels stay visible and get translated. Then the **inline pass** masks HTML comments/tags, URLs, `` `code` ``, `\*` runs and fences. Both passes share one token counter, so indices are unique but not in document order.
+- **Inline patterns are compiled per call** (`_build_inline_regexes`): the block pass leaves `{{0}}`-markers behind and the URL pattern has no delimiter that would stop at them, so the URL body gets a `(?!{{)` guard — otherwise a URL swallows the marker after it and that marker is lost on restore. Fuzz `temporary/fuzz_mask.py` checks this invariant; do not relax it.
+- **Block tokens are flagged structural**: `MaskedText.structural[i]` / `is_structural(i)`. A lost structural marker (heading, rule, quote, link bracket) means the translation lost document structure; a lost inline marker is only cosmetic. `translator._log_missing_markers` logs the two groups separately — **warn only, the step still succeeds**.
+- **`has_markdown()` covers block constructs too**, otherwise a text whose only Markdown is a heading or `---` would not be masked at all.
+- **Not protected** (still model-visible): list markers `- `/`1. `, tables, `~~strike~~`, `_underscore_` emphasis, reference links `[ref]: url`, and the label of a lone `[bracket]` without `(url)`.
 ## Cache
 
 - **DO NOT clear entire cache**. Only delete specific corrupt entries.
@@ -51,6 +57,10 @@ tui.py           — Textual TUI (server console)
 - Log shows a truncated hash on cache hits: `Cached translation <first-12-hex>`.
 - The FastAPI app exposes `DELETE /cache/{hash_key}` (single entry) and `POST /cache/{hash_key}/invalidate`; there is **no** clear-all route.
 - `GET /cache` lists all entries with previews to find the right hash.
+- **Versioned cache**: every entry carries `"version"` = `translator.TRANSLATOR_VERSION`. On a cache hit the entry is re-checked by `translator.cached_defect(source, cached, target)`; on a pass it is reused and only the `version` field is re-stamped (`cache_manager.set_version`, `created_at` untouched so `/cache` ordering survives). Entries written before versioning simply have no field and are read as `version=0` — they pass the check and get the current stamp.
+- **The static check is mask-vs-mask**: both the source and the stored translation go through `markdown_guard.mask_markdown`, and the two token multisets are compared one-way (`Counter(source) - Counter(cached)`). A stored translation has already been restored, so its placeholders are gone — comparing placeholders would be wrong. Markers the translation *gained* are ignored.
+- **A failed check re-translates, but only once per key per process** (`LLMTranslator._refreshed`). Without that guard a model that consistently drops a marker would re-pay for every request. The second failure is logged and the cache is served. TUI shows the count as `Stale`.
+- **Bump `TRANSLATOR_VERSION`** when a change makes old translations suspect (new prompt, different model, new mask rule). A bump alone re-stamps instead of re-translating: only `cached_defect` forces a refresh. On the current cache that would stamp 278 entries and refresh 149.
 
 ## Dependencies
 

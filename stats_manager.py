@@ -51,6 +51,7 @@ def log_event(
     target: str = "",
     step: str | None = None,
     steps_failed: list[str] | None = None,
+    version: int | None = None,
     latency_s: float | None = None,
     input_chars: int = 0,
     output_chars: int = 0,
@@ -70,6 +71,8 @@ def log_event(
         record["step"] = step
     if steps_failed:
         record["steps_failed"] = steps_failed
+    if version is not None:
+        record["version"] = version
     if latency_s is not None:
         record["latency_s"] = round(latency_s, 3)
     if input_chars:

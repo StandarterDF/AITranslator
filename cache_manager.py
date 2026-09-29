@@ -37,7 +37,13 @@ def _file_path(hash_key: str) -> Path:
     return CACHE_DIR / f"{hash_key}.json"
 
 
-def get_cache(source: str, target: str, text: str) -> str | None:
+def get_entry(source: str, target: str, text: str) -> dict | None:
+    """Read a raw cache entry, including the translator version stamp.
+
+    Returns None when there is no entry, it is marked invalid, or it cannot be
+    parsed.  The caller gets the whole dict so it can inspect `version` without
+    a second read.
+    """
     key = _cache_key(source, target, text)
     path = _file_path(key)
     if not path.exists():
@@ -48,13 +54,57 @@ def get_cache(source: str, target: str, text: str) -> str | None:
             logger.debug("Cache entry %s is marked as invalid, skipping", key[:12])
             return None
         logger.info("Cache hit for key %s", key[:12])
-        return data["translated_text"]
+        return data
     except (json.JSONDecodeError, KeyError, OSError) as e:
         logger.warning("Failed to read cache entry %s: %s", key[:12], e)
         return None
 
 
-def set_cache(source: str, target: str, text: str, translated_text: str):
+def get_cache(source: str, target: str, text: str) -> str | None:
+    data = get_entry(source, target, text)
+    if data is None:
+        return None
+    return data.get("translated_text")
+
+
+def get_version(entry: dict) -> int:
+    """Version stamp of an entry; 0 when it was written before versioning."""
+    version = entry.get("version")
+    if isinstance(version, bool) or not isinstance(version, int):
+        return 0
+    return version
+
+
+def set_version(hash_key: str, version: int) -> bool:
+    """Stamp an existing entry with the current translator version.
+
+    Only the ``version`` field is touched, so ``created_at`` — and with it the
+    order of the ``GET /cache`` listing — stays as it was.  A no-op (returns
+    False) when the entry already carries that version or does not exist.
+    """
+    path = _file_path(hash_key)
+    if not path.exists():
+        return False
+    try:
+        data = json.loads(path.read_text("utf-8"))
+        if get_version(data) == version:
+            return False
+        data["version"] = version
+        path.write_text(json.dumps(data, ensure_ascii=False, indent=2), "utf-8")
+        logger.debug("Cache entry %s stamped with version %d", hash_key[:12], version)
+        return True
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning("Failed to stamp version for %s: %s", hash_key[:12], e)
+        return False
+
+
+def set_cache(
+    source: str,
+    target: str,
+    text: str,
+    translated_text: str,
+    version: int = 0,
+):
     _ensure_cache_dir()
     key = _cache_key(source, target, text)
     path = _file_path(key)
@@ -65,6 +115,7 @@ def set_cache(source: str, target: str, text: str, translated_text: str):
         "source_text": text,
         "translated_text": translated_text,
         "created_at": time.time(),
+        "version": version,
         "invalid": False,
     }
     try:
@@ -134,6 +185,7 @@ def list_cache() -> list[dict]:
                     "translated_text_preview": data.get("translated_text", "")[:80],
                     "created_at": data.get("created_at", mtime),
                     "size": len(data.get("source_text", "")),
+                    "version": get_version(data),
                     "invalid": data.get("invalid", False),
                 }
             )

@@ -74,7 +74,7 @@ curl -X POST http://localhost:5555/translate \
 | `prompt_template.py` | Dynamic system/user prompt templates (any language pair) |
 | `validator.py` | Script-based language validation (≥50% target script) |
 | `markdown_guard.py` | Deterministic Markdown masking/restoration |
-| `cache_manager.py` | SHA256 JSON cache in `cache/` directory |
+| `cache_manager.py` | SHA256 JSON cache in `cache/` directory, version stamps |
 | `stats_manager.py` | JSONL event log + aggregated stats |
 
 ## ⚙️ Configuration
@@ -132,7 +132,7 @@ LIBRETRANSLATE_API_KEY=
 Ready-made minimal templates are in `configs/` (deepseek, localllm, deepseek+fallback). Copy the one you need to `config.json`.
 
 - `log_level` — root logger level: `DEBUG`, `INFO` (default), `WARNING`, `ERROR`. `DEBUG` enables verbose logs (full openai-client request bodies, httpcore connection details).
-- `preserve_markdown` (default `true`) — mask Markdown constructs (emphasis, inline code, HTML tags, links) with placeholders before sending to the model, restore them afterwards.
+- `preserve_markdown` (default `true`) — mask Markdown constructs with placeholders before sending to the model, restore them afterwards. Two passes: **block** (ATX heading markers, `---`/`***`/`___`/`===` rules, `───` box rules, `>` blockquotes, two-space hard breaks, `[text](url)` / `![alt](url)` brackets) and **inline** (emphasis, inline code, HTML tags/comments, URLs, fenced code). Heading text and link labels are still translated; only the markers are protected.
 - `translate_fenced_code` (default `true`) — translate the text inside ``` ``` blocks (only the fence delimiters are masked). `false` masks the whole block verbatim.
 
 ### Reasoning effort
@@ -220,6 +220,21 @@ Output is validated per language script. At least **50%** of alphabetic characte
 
 Falls through (always valid) for unsupported languages.
 
+## 💾 Cache versioning
+
+Every cache entry records the pipeline version that produced it (`translator.TRANSLATOR_VERSION`). On a cache hit the stored translation is re-checked statically before it is served — no model call, just deterministic checks:
+
+1. **Markers** — the source and the stored translation are both masked with the same rules and their Markdown markers are compared. Anything the source has and the translation lost (`*`, `**`, `---`, `##`, hard breaks, link brackets) fails the check. Markers the translation gained are ignored.
+2. **Language** — the same 50% script check as fresh output.
+
+| Stored entry | Static check | Result |
+|---|---|---|
+| passes | — | served; if its `version` is older, only the version field is restamped (`created_at` untouched) |
+| fails | — | invalidated and re-translated, once per key per server run |
+| fails again after a refresh | — | served from cache with a warning, rather than paying for the same text twice |
+
+Entries written before versioning have no `version` field and are read as `0`, so they are simply stamped with the current version. Bumping `TRANSLATOR_VERSION` (new prompt, different model, new mask rule) therefore re-stamps good entries instead of re-translating them — only a failed check forces new work. TUI counts the rejected entries under `Stale`.
+
 ## 📦 Dependencies
 
 ```
@@ -304,7 +319,7 @@ curl -X POST http://localhost:5555/translate \
 | `config.py` | Загрузчик конфигурации (.env ключи + parsing config.json) |
 | `prompt_template.py` | Динамический системный/пользовательский промпт (любая языковая пара) |
 | `validator.py` | Валидация языка по скрипту (≥50% целевого алфавита) |
-| `cache_manager.py` | SHA256 JSON-кэш в `cache/` |
+| `cache_manager.py` | SHA256 JSON-кэш в `cache/`, версии переводов |
 
 ## ⚙️ Конфигурация
 
@@ -359,7 +374,7 @@ LIBRETRANSLATE_API_KEY=
 Готовые минимальные шаблоны лежат в `configs/` (deepseek, localllm, deepseek+fallback). Скопируйте нужный в `config.json`.
 
 - `log_level` — уровень логирования корневого логгера: `DEBUG`, `INFO` (по умолчанию), `WARNING`, `ERROR`. `DEBUG` включает подробные логи (полные тела запросов openai-клиента, connection-детали httpcore).
-- `preserve_markdown` (по умолчанию `true`) — маскировать Markdown-разметку (выделение, инлайн-код, HTML-теги, ссылки) плейсхолдерами до отправки в модель и восстанавливать после.
+- `preserve_markdown` (по умолчанию `true`) — маскировать Markdown-разметку плейсхолдерами до отправки в модель и восстанавливать после. Два прохода: **блочный** (маркеры заголовков `#`, разделители `---`/`***`/`___`/`===`/`───`, цитаты `>`, перенос строки двумя пробелами, скобки `[текст](url)` / `![alt](url)`) и **инлайновый** (выделение, инлайн-код, HTML-теги/комментарии, URL, блоки кода). Текст заголовка и подпись ссылки при этом переводятся — защищаются только сами маркеры.
 - `translate_fenced_code` (по умолчанию `true`) — переводить текст внутри блоков ``` ``` (маскируются только сами разделители). `false` — маскировать блок целиком.
 
 ### Режим мышления (reasoning effort)
@@ -446,6 +461,21 @@ LIBRETRANSLATE_API_KEY=
 - 🔤 Латиница — en, es, fr, de, it, pt, nl, pl, tr, vi, cs, sv, da, fi, id, ms, no, ro, hu
 
 Для неподдерживаемых языков валидация пропускается.
+
+## 💾 Версионирование кэша
+
+Каждая запись кэша хранит версию конвейера, которая её создала (`translator.TRANSLATOR_VERSION`). При попадании в кэш сохранённый перевод повторно проверяется статически — без обращения к модели:
+
+1. **Маркеры** — источник и сохранённый перевод маскируются одними и теми же правилами, затем сравниваются инвентари разметки. Всё, чего нет в переводе, но было в источнике (`*`, `**`, `---`, `##`, переносы двумя пробелами, скобки ссылок), считает проверку проваленной. Маркеры, которые перевод приобрёл, игнорируются.
+2. **Язык** — та же проверка по 50% скрипта, что и для свежего вывода.
+
+| Запись | Проверка | Результат |
+|---|---|---|
+| пройдена | — | отдаётся из кэша; если `version` старее, обновляется только поле `version` (`created_at` не трогается) |
+| провалена | — | помечается невалидной и переводится заново, один раз на ключ за запуск сервера |
+| провалена снова после обновления | — | отдаётся из кэша с предупреждением, вместо повторной оплаты того же текста |
+
+Записи, сделанные до появления версий, поля `version` не содержат и читаются как `0` — им просто проставляется текущая версия. Поэтому сам bump `TRANSLATOR_VERSION` (новый промпт, другая модель, новое правило маскирования) перепроставляет хорошие записи, а не переводит их заново: новую работу создаёт только проваленная проверка. TUI показывает отклонённые записи счётчиком `Stale`.
 
 ## 📦 Зависимости
 
