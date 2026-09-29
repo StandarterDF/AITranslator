@@ -133,6 +133,12 @@ async def translate(request: Request):
         return await translator.translate(payload, source, target.strip())
     except TranslationError as e:
         raise HTTPException(e.status_code, detail=e.message)
+    except Exception as e:
+        # Without this the client only sees "Internal Server Error" and the
+        # cause exists solely in the logs, which makes a report like that
+        # impossible to act on.
+        logger.exception("Unhandled error while translating")
+        raise HTTPException(500, detail=f"{type(e).__name__}: {e}")
 
 
 @app.get("/cache")

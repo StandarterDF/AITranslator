@@ -401,8 +401,19 @@ class LLMTranslator:
         key = cache_manager.cache_key(source_lang, target_lang, text)
 
         entry = cache_manager.get_entry(source_lang, target_lang, text)
+        cached: str = ""
         if entry is not None:
-            cached = entry.get("translated_text", "")
+            stored_text = entry.get("translated_text")
+            if isinstance(stored_text, str):
+                cached = stored_text
+            else:
+                # a truncated or hand-edited entry: treat it as no entry at all
+                logger.warning(
+                    "Cache entry %s has no usable translated_text, ignoring it",
+                    key[:12],
+                )
+                entry = None
+        if entry is not None:
             defect = cached_defect(text, cached, target_lang)
             stored = cache_manager.get_version(entry)
 
@@ -515,7 +526,6 @@ class LLMTranslator:
 
                 if result and result.strip():
                     clean = result.strip()
-                    clean = restore_urls(text, clean)
                     wanted_eol = source_line_ending(text)
                     if wanted_eol == "\r\n" and source_line_ending(clean) == "\n":
                         logger.debug(
