@@ -13,8 +13,14 @@ services:
     # Without those variables this falls back to 1000:1000, which is right on
     # many servers and wrong on the rest.
     user: "${UID:-1000}:${GID:-1000}"
-    ports:
-      - "5555:5555"
+    # Host networking, not a published port: SillyTavern sends outbound requests
+    # through a SOCKS5 proxy (requestProxy in its config.yaml), and that proxy
+    # refuses to connect to a Docker-published port on the host's own LAN IP
+    # ("Socks5 proxy rejected connection"). On the host network the app listens
+    # on 5555 directly, exactly like the plain-python run it replaced, so the
+    # proxy's hairpin never goes through Docker NAT.
+    network_mode: host
+    # `ports` cannot be combined with `network_mode: host` — it is ignored.
     env_file:
       - .env
     volumes:
