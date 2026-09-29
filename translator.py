@@ -280,9 +280,12 @@ class LLMTranslator:
         }
 
     async def aclose(self):
+        # openai 2.x names the coroutine `close`; 1.x had `aclose`. Accept both,
+        # otherwise the client is never closed and every shutdown logs a warning.
         for name, client in self._llm_clients.items():
+            closer = getattr(client, "close", None) or getattr(client, "aclose")
             try:
-                await client.aclose()
+                await closer()
                 logger.debug("Closed client for provider %s", name)
             except Exception as e:
                 logger.warning("Failed to close client for provider %s: %s", name, e)
