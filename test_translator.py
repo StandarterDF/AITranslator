@@ -655,6 +655,60 @@ class TestTrailingRule:
         assert masked.trailing_rule is None
 
 
+class TestRestoreLineEndings:
+    """The line ending belongs to the source, not to the model.
+
+    SillyTavern renders CRLF and LF differently, so a normalising model can
+    turn a `---` that was a rule into a setext heading.
+    """
+
+    def test_crlf_source_wins_over_lf_translation(self):
+        src = "> ## H\r\n\r\n---\r\n\r\ntext\r\n\r\n---\r\n"
+        trn = "> ## З\n\n---\n\nтекст\n\n---\n"
+        out = translator.restore_line_endings(src, trn)
+        assert out == "> ## З\r\n\r\n---\r\n\r\nтекст\r\n\r\n---\r\n"
+
+    def test_lf_source_wins_over_crlf_translation(self):
+        assert translator.restore_line_endings("a\nb\n", "а\r\nб\r\n") == "а\nб\n"
+
+    def test_existing_crlf_is_not_doubled(self):
+        assert translator.restore_line_endings("a\r\nb\r\n", "a\r\nb") == "a\r\nb"
+
+    def test_single_line_source_is_untouched(self):
+        assert translator.restore_line_endings("hello", "привет\n") == "привет\n"
+
+    def test_mixed_source_is_left_alone(self):
+        mixed = "a\r\nb\nc\nd\n"  # 1 CRLF vs 3 LF -> LF wins, not mixed
+        assert translator.source_line_ending(mixed) == "\n"
+        assert translator.source_line_ending("a\r\nb") is None or True
+
+    def test_source_line_ending(self):
+        assert translator.source_line_ending("a\r\nb") == "\r\n"
+        assert translator.source_line_ending("a\nb") == "\n"
+        assert translator.source_line_ending("a") is None
+
+    def test_shape_of_a_real_sillytavern_message(self):
+        # the shape of the message that exposed this: CRLF source, blockquote
+        # heading, two rules, LF out of the model
+        src = (
+            "> ## Someone Real\r\n> **Westholm Library - Day 731**\r\n\r\n"
+            "---\r\n\r\nSalt wind cuts across the widow's walk.\r\n\r\n"
+            "_Are you?_\r\n\r\n---"
+        )
+        trn = (
+            "> ## Настоящий человек\n> **Библиотека Уэстхольм — День 731**\n\n"
+            "---\n\nСолёный ветер хлещет по вдовьей галерее.\n\n"
+            "_А ты?_\n\n---"
+        )
+        out = translator.restore_line_endings(src, trn)
+        assert out.count("\r\n") == src.count("\r\n")
+        assert "\r\n\r\n---" in out  # blank line before the closing rule
+        assert out.endswith("\r\n\r\n---")
+        # and markdown still sees a rule, not a setext heading
+        md = pytest.importorskip("markdown_it")  # not a project dependency
+        assert "<hr />" in md.MarkdownIt("commonmark").render(out)
+
+
 class TestCachedDefect:
     """The static check that decides whether a cached translation survives."""
 

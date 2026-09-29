@@ -51,6 +51,7 @@ temporary/       — scratch analysis scripts (gitignored, not part of the app)
 - **Block tokens are flagged structural**: `MaskedText.structural[i]` / `is_structural(i)`. A lost structural marker (heading, rule, quote, link bracket) means the translation lost document structure; a lost inline marker is only cosmetic. `translator._log_missing_markers` logs the two groups separately — **warn only, the step still succeeds**.
 - **`has_markdown()` covers block constructs too**, otherwise a text whose only Markdown is a heading or `---` would not be masked at all.
 - **Not protected** (still model-visible): list markers `- `/`1. `, tables, `~~strike~~`, `_underscore_` emphasis, reference links `[ref]: url`, and the label of a lone `[bracket]` without `(url)`.
+- **Line endings belong to the source.** `translator.restore_line_endings(source, translation)` (next to `restore_urls`) gives the output the source's dominant ending, because a model normalises CRLF to LF on its own and SillyTavern renders the two differently. It runs both on the success path and on the cache-hit path: `cache_manager._cache_key` normalises line endings, so one entry serves CRLF and LF requests and each must get its own back. A genuinely mixed source returns `None` from `source_line_ending` and is left alone.
 ## Cache
 
 - **DO NOT clear entire cache**. Only delete specific corrupt entries.

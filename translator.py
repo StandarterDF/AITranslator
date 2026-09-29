@@ -63,6 +63,46 @@ class TranslationError(Exception):
         self.status_code = status_code
 
 
+def source_line_ending(text: str) -> str | None:
+    """Dominant line ending of the source: '\\r\\n', '\\n', or None.
+
+    None means the text has no line breaks at all, or is genuinely mixed — in
+    both cases there is no single shape to impose.
+    """
+    crlf = text.count("\r\n")
+    lf = text.count("\n") - crlf
+    total = crlf + lf
+    if total == 0:
+        return None
+    if crlf * 2 > total:
+        return "\r\n"
+    if lf * 2 > total:
+        return "\n"
+    return None
+
+
+def restore_line_endings(original: str, translation: str) -> str:
+    """Give the translation the line endings its source used.
+
+    A model normalises CRLF to LF on its own, but the line ending is part of
+    the shape the client was given, not something translation may change: it
+    decides how the message is rendered.  SillyTavern renders CRLF and LF
+    differently, so a `---` that stayed a rule in the source stops being one
+    after normalisation.  The source is the authority, exactly as it is for
+    URLs in restore_urls.
+
+    Applied on the way out and on the way back from the cache, because the
+    cache key normalises line endings — one entry therefore serves both a CRLF
+    and an LF request, and each of them must get its own.
+    """
+    wanted = source_line_ending(original)
+    if wanted == "\r\n":
+        return re.sub(r"(?<!\r)\n", "\r\n", translation)
+    if wanted == "\n":
+        return translation.replace("\r\n", "\n")
+    return translation
+
+
 def estimate_tokens(text: str) -> int:
     return max(1, len(text) // 4)
 
@@ -337,7 +377,11 @@ class LLMTranslator:
                     input_chars=len(text),
                     preview=text[:80],
                 )
-                return {"translatedText": restore_urls(text, cached)}
+                return {
+                    "translatedText": restore_line_endings(
+                        text, restore_urls(text, cached)
+                    )
+                }
 
             if key in self._refreshed:
                 # Already re-translated once this run and the new one failed the
@@ -360,7 +404,11 @@ class LLMTranslator:
                     preview=text[:80],
                     error=defect,
                 )
-                return {"translatedText": restore_urls(text, cached)}
+                return {
+                    "translatedText": restore_line_endings(
+                        text, restore_urls(text, cached)
+                    )
+                }
 
             self._refreshed.add(key)
             self.stale += 1
@@ -425,6 +473,19 @@ class LLMTranslator:
                 if result and result.strip():
                     clean = result.strip()
                     clean = restore_urls(text, clean)
+                    wanted_eol = source_line_ending(text)
+                    if wanted_eol == "\r\n" and source_line_ending(clean) == "\n":
+                        logger.debug(
+                            "Model normalised CRLF to LF; restoring the source's "
+                            "line endings"
+                        )
+                    clean = restore_line_endings(text, clean)
+                    if wanted_eol and source_line_ending(clean) != wanted_eol:
+                        logger.warning(
+                            "Line endings still differ from the source: %r -> %r",
+                            wanted_eol,
+                            source_line_ending(clean),
+                        )
                     self.translations += 1
                     logger.info(
                         "[%d/%d] %s — SUCCESS (%.1fs)", step_num, total, label, elapsed
