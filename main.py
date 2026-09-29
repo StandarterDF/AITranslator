@@ -111,15 +111,22 @@ async def translate(request: Request):
         )
         raise HTTPException(400, detail="target is required")
 
+    payload = q.strip()
+    # An image count in the request log settles, without guessing, whether a
+    # missing image was lost here or never sent by the client: the cached
+    # source_text is the request verbatim.
     logger.info(
-        "Translation request: %d chars (source=%s target=%s)",
-        len(q.strip()),
+        "Translation request: %d chars, %d markdown image(s), %d link(s) "
+        "(source=%s target=%s)",
+        len(payload),
+        payload.count("!["),
+        payload.count("](") - payload.count("!["),
         source,
         target,
     )
 
     try:
-        return await translator.translate(q.strip(), source, target.strip())
+        return await translator.translate(payload, source, target.strip())
     except TranslationError as e:
         raise HTTPException(e.status_code, detail=e.message)
 
