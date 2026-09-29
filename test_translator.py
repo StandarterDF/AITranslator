@@ -435,15 +435,25 @@ class TestMarkdownGuardBlocks:
         masked = markdown_guard.mask_markdown("#NoSpace\n")
         assert masked.tokens == []
 
-    def test_rule_line_masked_with_newline(self):
+    def test_rule_placeholder_is_a_whole_line(self):
+        # Regression: the rule token used to swallow the trailing newline, so
+        # the placeholder ended up glued to the next line and the model could
+        # not tell it was a separator — that is where most rules were lost.
         masked = markdown_guard.mask_markdown("a\n---\nb\n")
-        assert masked.text == f"a\n{masked.placeholder(0)}b\n"
-        assert masked.tokens == ["---\n"]
+        assert masked.text == f"a\n{masked.placeholder(0)}\nb\n"
+        assert masked.tokens == ["---"]
+
+    def test_rule_token_has_no_line_ending(self):
+        # Keeps a CRLF source and an LF translation comparable token by token.
+        for text in ("a\r\n---\r\nb\r\n", "a\n---\nb\n", "a\r\n---\r\nb\n"):
+            masked = markdown_guard.mask_markdown(text)
+            assert all("\r" not in t and "\n" not in t for t in masked.tokens)
 
     def test_box_rule_masked(self):
         masked = markdown_guard.mask_markdown("before\n───────\nafter\n")
         assert "─" not in masked.text
-        assert masked.tokens == ["───────\n"]
+        assert masked.text == f"before\n{masked.placeholder(0)}\nafter\n"
+        assert masked.tokens == ["───────"]
 
     def test_quote_marker_masked(self):
         masked = markdown_guard.mask_markdown("> quote\n")
@@ -582,6 +592,69 @@ class TestMarkdownGuardBlocks:
             assert markdown_guard.missing_placeholders(masked.text, masked) == []
 
 
+class TestTrailingRule:
+    """A placeholder alone on the last line is the one spot models drop, and a
+    rule at the end of a message is visible to the client."""
+
+    def _dropped(self, text, index=None):
+        masked = markdown_guard.mask_markdown(text)
+        assert masked.trailing_rule is not None
+        idx = masked.trailing_rule[0] if index is None else index
+        return masked, masked.text.replace(masked.placeholder(idx), "")
+
+    def test_rule_at_end_is_put_back(self):
+        masked, model_out = self._dropped("Some text.\n\n---\n")
+        out = markdown_guard.restore_markdown(model_out, masked)
+        assert out == "Some text.\n\n---\n"
+
+    def test_trailing_rule_repaired_after_blank_line(self):
+        masked, model_out = self._dropped("Some text.\n\n---\n")
+        out = markdown_guard.restore_markdown(model_out, masked)
+        assert out == "Some text.\n\n---\n"
+
+    def test_trailing_rule_repaired_with_crlf_source(self):
+        masked, model_out = self._dropped("Some text.\r\n\r\n---\r\n")
+        out = markdown_guard.restore_markdown(model_out, masked)
+        assert out == "Some text.\r\n\r\n---\r\n"
+
+    def test_trailing_setext_stays_setext(self):
+        # one newline before the rule: an H2 underline, so the repair must not
+        # invent the blank line that would turn it into a thematic break
+        masked, model_out = self._dropped("Title\n---")
+        out = markdown_guard.restore_markdown(model_out, masked)
+        assert out == "Title\n---"
+
+    def test_trailing_rule_not_duplicated_when_kept(self):
+        text = "Some text.\n\n---\n"
+        masked = markdown_guard.mask_markdown(text)
+        out = markdown_guard.restore_markdown(masked.text, masked)
+        assert out == text
+        assert out.count("---") == 1
+
+    def test_dropped_middle_rule_is_not_moved_to_the_end(self):
+        text = "a\n---\nb\n\n---\n"
+        masked = markdown_guard.mask_markdown(text)
+        # drop the *first* rule, keep the trailing one
+        model_out = masked.text.replace(masked.placeholder(0), "")
+        out = markdown_guard.restore_markdown(model_out, masked)
+        assert out.count("---") == 1
+        assert out.endswith("b\n\n---\n")
+
+    def test_lone_rule_needs_no_repair(self):
+        masked = markdown_guard.mask_markdown("---")
+        assert masked.trailing_rule is None
+        assert markdown_guard.restore_markdown("", masked) == ""
+
+    def test_box_rule_at_end_repaired(self):
+        masked, model_out = self._dropped("text\n\n───────\n")
+        out = markdown_guard.restore_markdown(model_out, masked)
+        assert out == "text\n\n───────\n"
+
+    def test_no_trailing_rule_recorded_for_middle_one(self):
+        masked = markdown_guard.mask_markdown("a\n---\nb\n")
+        assert masked.trailing_rule is None
+
+
 class TestCachedDefect:
     """The static check that decides whether a cached translation survives."""
 
@@ -633,6 +706,20 @@ class TestCachedDefect:
         with patch.object(config, "PRESERVE_MARKDOWN", False):
             broken = self.GOOD.replace("## ", "").replace("*", "")
             assert translator.cached_defect(self.SOURCE, broken, "ru") is None
+
+    def test_crlf_source_and_lf_translation_agree(self):
+        # Regression: rule tokens used to contain the trailing newline, so a
+        # CRLF source never matched an LF translation and every intact rule was
+        # reported as lost — which meant paying to re-translate good entries.
+        source = "## H\r\n\r\n---\r\n\r\nsome text here"
+        translated = "## З\n\n---\n\nнекоторый текст здесь"
+        assert translator.cached_defect(source, translated, "ru") is None
+
+    def test_crlf_source_missing_rule_is_still_a_defect(self):
+        source = "## H\r\n\r\n---\r\n\r\nsome text here"
+        translated = "## З\n\nнекоторый текст здесь"
+        reason = translator.cached_defect(source, translated, "ru")
+        assert reason is not None and "---" in reason
 
 
 class TestCacheVersioning:
