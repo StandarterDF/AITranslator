@@ -86,6 +86,36 @@ def source_line_ending(text: str) -> str | None:
     return None
 
 
+def _leading_whitespace(text: str) -> str:
+    return text[: len(text) - len(text.lstrip())]
+
+
+def _trailing_whitespace(text: str) -> str:
+    return text[len(text.rstrip()) :]
+
+
+def restore_surrounding_whitespace(original: str, translation: str) -> str:
+    """Give the translation the source's leading and trailing whitespace.
+
+    SillyTavern's built-in translate extension splits a message at every
+    markdown image, translates each piece on its own and re-inserts the links
+    itself, with no separator of its own
+    (``public/scripts/extensions/translate/index.js``).  The piece it sends
+    therefore ends with the blank line that separated the text from the image,
+    and our reply is glued straight onto that link.  A stripped reply turns
+    ``...\\n\\n---\\n\\n`` + ``![img](url)`` into ``---![img](url)``, which is
+    neither a rule nor an image: markdown prints it as text and both disappear.
+
+    The cache key is computed from the stripped text, so preserving this costs
+    nothing — existing entries still hit.
+    """
+    return (
+        _leading_whitespace(original)
+        + translation.strip()
+        + _trailing_whitespace(original)
+    )
+
+
 def restore_line_endings(original: str, translation: str) -> str:
     """Give the translation the line endings its source used.
 
@@ -175,6 +205,19 @@ def _mask_if_needed(text: str) -> markdown_guard.MaskedText | None:
         return None
     return markdown_guard.mask_markdown(
         text, translate_fenced=config.TRANSLATE_FENCED_CODE
+    )
+
+
+def _finish(source: str, translated: str) -> str:
+    """Put the source's own shape back on a translation before returning it.
+
+    Applied to fresh output and to a cache hit alike, because a stored
+    translation is stripped: the leading and trailing whitespace and the line
+    endings all belong to the request that came in, not to what the model or
+    the cache file happen to hold.
+    """
+    return restore_line_endings(
+        source, restore_surrounding_whitespace(source, restore_urls(source, translated))
     )
 
 
@@ -385,11 +428,7 @@ class LLMTranslator:
                     input_chars=len(text),
                     preview=text[:80],
                 )
-                return {
-                    "translatedText": restore_line_endings(
-                        text, restore_urls(text, cached)
-                    )
-                }
+                return {"translatedText": _finish(text, cached)}
 
             if key in self._refreshed:
                 # Already re-translated once this run and the new one failed the
@@ -412,11 +451,7 @@ class LLMTranslator:
                     preview=text[:80],
                     error=defect,
                 )
-                return {
-                    "translatedText": restore_line_endings(
-                        text, restore_urls(text, cached)
-                    )
-                }
+                return {"translatedText": _finish(text, cached)}
 
             self._refreshed.add(key)
             self.stale += 1
@@ -487,7 +522,7 @@ class LLMTranslator:
                             "Model normalised CRLF to LF; restoring the source's "
                             "line endings"
                         )
-                    clean = restore_line_endings(text, clean)
+                    clean = _finish(text, clean)
                     if wanted_eol and source_line_ending(clean) != wanted_eol:
                         logger.warning(
                             "Line endings still differ from the source: %r -> %r",

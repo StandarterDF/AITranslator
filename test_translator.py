@@ -790,6 +790,73 @@ class TestRestoreLineEndings:
         assert "<hr />" in md.MarkdownIt("commonmark").render(out)
 
 
+class TestSillyTavernChunking:
+    """SillyTavern's translate extension splits a message at every markdown
+    image, translates each piece on its own and re-inserts the links itself,
+    with no separator (public/scripts/extensions/translate/index.js).  The
+    piece it sends therefore ends with the blank line that separated the text
+    from the image, and a stripped reply glues the two together.
+    """
+
+    IMAGE = (
+        "![img](https://altimesia.neocities.org/images/greetings/elaine/"
+        "Elaine-e01.webp)"
+    )
+    CHUNK = "_Are you?_\r\n\r\n---\r\n\r\n"
+
+    def test_trailing_blank_line_survives(self):
+        out = translator.restore_surrounding_whitespace(
+            self.CHUNK, "_\u0410 \u0442\u044b?_\r\n\r\n---"
+        )
+        assert out == "_\u0410 \u0442\u044b?_\r\n\r\n---\r\n\r\n"
+
+    def test_nothing_added_when_source_has_no_trailing_whitespace(self):
+        assert translator.restore_surrounding_whitespace("a\nb", "a\nb") == "a\nb"
+
+    def test_leading_whitespace_preserved(self):
+        assert (
+            translator.restore_surrounding_whitespace("\n\n  text", "text")
+            == "\n\n  text"
+        )
+
+    def test_lf_variant(self):
+        assert (
+            translator.restore_surrounding_whitespace("text\n\n---\n\n", "tekst\n\n---")
+            == "tekst\n\n---\n\n"
+        )
+
+    def test_cache_key_ignores_surrounding_whitespace(self):
+        # so restoring it costs nothing: existing entries still hit
+        import cache_manager
+
+        a = cache_manager.cache_key("auto", "ru", "text\n\n---\n\n")
+        b = cache_manager.cache_key("auto", "ru", "text\n\n---")
+        assert a == b
+
+    def test_image_is_not_glued_onto_the_rule(self):
+        md = pytest.importorskip("markdown_it")  # not a project dependency
+        reply = translator.restore_surrounding_whitespace(
+            self.CHUNK, "_\u0410 \u0442\u044b?_\r\n\r\n---"
+        )
+        # what SillyTavern then does: append the link with no separator
+        message = reply + self.IMAGE
+        html = md.MarkdownIt("commonmark").render(message)
+        assert "---![" not in message
+        assert html.count("<hr />") == 1
+        assert html.count("<img") == 1
+
+    def test_stripped_reply_would_have_broken_it(self):
+        # the regression itself, kept as a statement of what we avoid
+        md = pytest.importorskip("markdown_it")
+        broken = self.CHUNK.strip() + self.IMAGE
+        html = md.MarkdownIt("commonmark").render(broken)
+        assert broken.count("---![") == 1
+        # the image still renders, but inline: the rule is now a literal
+        # paragraph of dashes, which is what the client showed as "not right"
+        assert "<hr />" not in html
+        assert "<p>---<img" in html
+
+
 class TestCachedDefect:
     """The static check that decides whether a cached translation survives."""
 
@@ -863,6 +930,9 @@ class TestCacheVersioning:
     SOURCE = TestCachedDefect.SOURCE
     GOOD = TestCachedDefect.GOOD
     BROKEN = "Кто-то настоящий\nБиблиотека Вестхольм\n\nСолёный ветер.\n"
+    # SOURCE ends with a newline, so every reply keeps it: a stored translation
+    # is stripped, and the surrounding whitespace is restored on the way out
+    REPLY = GOOD + "\n"
 
     @pytest.fixture
     def env(self, tmp_path, monkeypatch):
@@ -905,7 +975,7 @@ class TestCacheVersioning:
         key = self._write_entry(env, self.GOOD)  # no version field at all
         with patch.object(translator.LLMTranslator, "_translate_via_llm") as llm:
             result = self._translate(env)
-        assert result["translatedText"] == self.GOOD
+        assert result["translatedText"] == self.REPLY
         llm.assert_not_called()
         entry = self._read_entry(key)
         assert entry["version"] == translator.TRANSLATOR_VERSION
@@ -917,7 +987,7 @@ class TestCacheVersioning:
         key = self._write_entry(env, self.GOOD, version=0)
         with patch.object(translator.LLMTranslator, "_translate_via_llm") as llm:
             result = self._translate(env)
-        assert result["translatedText"] == self.GOOD
+        assert result["translatedText"] == self.REPLY
         llm.assert_not_called()
         assert self._read_entry(key)["version"] == translator.TRANSLATOR_VERSION
 
@@ -937,10 +1007,10 @@ class TestCacheVersioning:
             new=AsyncMock(return_value=self.GOOD),
         ):
             result = self._translate(env)
-        assert result["translatedText"] == self.GOOD
+        assert result["translatedText"] == self.REPLY
         assert env.stale == 1
         entry = self._read_entry(key)
-        assert entry["translated_text"] == self.GOOD
+        assert entry["translated_text"] == self.REPLY
         assert entry["version"] == translator.TRANSLATOR_VERSION
         assert entry["invalid"] is False
 
@@ -953,7 +1023,7 @@ class TestCacheVersioning:
         ) as llm:
             self._translate(env)
             second = self._translate(env)
-        assert second["translatedText"] == self.GOOD
+        assert second["translatedText"] == self.REPLY
         assert llm.call_count == 1  # the second call came from cache
         assert env.cached == 1
 

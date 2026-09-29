@@ -111,7 +111,11 @@ async def translate(request: Request):
         )
         raise HTTPException(400, detail="target is required")
 
-    payload = q.strip()
+    # Not stripped: SillyTavern splits a message at every markdown image and
+    # re-inserts the links itself with no separator, so the trailing blank line
+    # we were sent is the only thing keeping the image on its own line. The
+    # cache key is computed from the stripped text either way.
+    payload = q
     # An image count in the request log settles, without guessing, whether a
     # missing image was lost here or never sent by the client: the cached
     # source_text is the request verbatim.
