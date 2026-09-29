@@ -472,9 +472,10 @@ class TestMarkdownGuardBlocks:
         assert "label" in masked.text
         assert "https://e.com" not in masked.text
 
-    def test_image_brackets_masked(self):
+    def test_image_masked_whole_alt_included(self):
         masked = markdown_guard.mask_markdown("![img](a.png)\n")
-        assert masked.tokens == ["![", "](a.png)"]
+        assert masked.tokens == ["![img](a.png)"]
+        assert masked.text == f"{masked.placeholder(0)}\n"
 
     def test_fence_content_is_not_block_masked(self):
         text = "```\n## not a heading\n---\n```\n"
@@ -592,15 +593,20 @@ class TestMarkdownGuardBlocks:
             assert markdown_guard.missing_placeholders(masked.text, masked) == []
 
 
-class TestTrailingRule:
-    """A placeholder alone on the last line is the one spot models drop, and a
-    rule at the end of a message is visible to the client."""
+class TestTrailingConstruct:
+    """A construct that reduces to bare placeholders on the last line is the one
+    spot models drop ? a trailing rule, or a trailing image.  The client sees
+    both: a message ending without its divider, and one ending without its
+    image."""
 
     def _dropped(self, text, index=None):
         masked = markdown_guard.mask_markdown(text)
-        assert masked.trailing_rule is not None
-        idx = masked.trailing_rule[0] if index is None else index
-        return masked, masked.text.replace(masked.placeholder(idx), "")
+        assert masked.trailing is not None
+        indices = masked.trailing[0]
+        model_out = masked.text
+        for i in indices:
+            model_out = model_out.replace(masked.placeholder(i), "")
+        return masked, model_out
 
     def test_rule_at_end_is_put_back(self):
         masked, model_out = self._dropped("Some text.\n\n---\n")
@@ -642,7 +648,7 @@ class TestTrailingRule:
 
     def test_lone_rule_needs_no_repair(self):
         masked = markdown_guard.mask_markdown("---")
-        assert masked.trailing_rule is None
+        assert masked.trailing is None
         assert markdown_guard.restore_markdown("", masked) == ""
 
     def test_box_rule_at_end_repaired(self):
@@ -650,9 +656,84 @@ class TestTrailingRule:
         out = markdown_guard.restore_markdown(model_out, masked)
         assert out == "text\n\n───────\n"
 
-    def test_no_trailing_rule_recorded_for_middle_one(self):
+    def test_no_repair_registered_for_middle_rule(self):
         masked = markdown_guard.mask_markdown("a\n---\nb\n")
-        assert masked.trailing_rule is None
+        assert masked.trailing is None
+
+    # ------------------------------------------------- trailing image
+
+    IMAGE = "![img](https://e.com/pic/Elaine-e01.webp)"
+
+    def test_trailing_image_put_back(self):
+        src = f"Some text.\n\n---\n\n{self.IMAGE}\n"
+        masked, model_out = self._dropped(src)
+        out = markdown_guard.restore_markdown(model_out, masked)
+        assert out == src
+        assert self.IMAGE in out
+
+    def test_trailing_image_repaired_when_its_token_is_lost(self):
+        src = "?????.\n\n" + self.IMAGE + "\r\n"
+        masked = markdown_guard.mask_markdown(src)
+        model_out = masked.text
+        for i in masked.trailing[0]:
+            model_out = model_out.replace(masked.placeholder(i), "")
+        out = markdown_guard.restore_markdown(model_out, masked)
+        assert out == src
+
+    def test_image_is_a_single_token_so_a_half_drop_is_impossible(self):
+        # The alt text of an image is not rendered, so the whole construct is
+        # one token.  That is what makes a clean repair possible: there is no
+        # bare label left behind when the model drops the token.
+        masked = markdown_guard.mask_markdown("Текст.\n\n" + self.IMAGE)
+        assert masked.tokens == [self.IMAGE]
+        assert "img" not in masked.text
+        assert "webp" not in masked.text
+
+    def test_image_alt_text_is_not_translated(self):
+        # consequence of the above, and the point: a translated alt text would
+        # no longer compare equal to the source token in cached_defect
+        masked = markdown_guard.mask_markdown(self.IMAGE)
+        assert masked.text == masked.placeholder(0)
+
+    def test_link_label_still_translated(self):
+        # a link is different: its text is what the reader sees
+        masked = markdown_guard.mask_markdown("[text](https://e.com)\n")
+        assert masked.tokens == ["[", "](https://e.com)"]
+        assert masked.text == (f"{masked.placeholder(0)}text{masked.placeholder(1)}\n")
+
+    def test_trailing_image_not_duplicated_when_kept(self):
+        src = "?????.\n\n" + self.IMAGE + "\n"
+        masked = markdown_guard.mask_markdown(src)
+        out = markdown_guard.restore_markdown(masked.text, masked)
+        assert out == src
+        assert out.count("![") == 1
+
+    def test_trailing_image_survives_a_lost_middle_rule(self):
+        src = "a\n---\nb\n\n" + self.IMAGE + "\n"
+        masked = markdown_guard.mask_markdown(src)
+        mid = next(i for i, tok in enumerate(masked.tokens) if tok == "---")
+        model_out = masked.text.replace(masked.placeholder(mid), "")
+        for i in masked.trailing[0]:
+            model_out = model_out.replace(masked.placeholder(i), "")
+        out = markdown_guard.restore_markdown(model_out, masked)
+        assert self.IMAGE in out
+        assert out.count("---") == 0  # the middle one is only logged, not moved
+
+    def test_rule_then_image_is_the_reported_shape(self):
+        # the exact layout that lost the image: heading, rule, text, rule, image
+        src = (
+            "> ## Someone Real\r\n**Westholm Library**\r\n\r\n---\r\n\r\n"
+            "Salt wind cuts across the widow's walk.\r\n\r\n_Are you?_\r\n"
+            "\r\n---\r\n\r\n" + self.IMAGE + "\r\n"
+        )
+        masked = markdown_guard.mask_markdown(src)
+        assert masked.trailing is not None
+        assert masked.trailing[2] == self.IMAGE
+        model_out = masked.text
+        for i in masked.trailing[0]:
+            model_out = model_out.replace(masked.placeholder(i), "")
+        out = markdown_guard.restore_markdown(model_out, masked)
+        assert out.endswith(self.IMAGE + "\r\n")
 
 
 class TestRestoreLineEndings:

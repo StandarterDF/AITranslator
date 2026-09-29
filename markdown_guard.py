@@ -90,9 +90,7 @@ _HARD_BREAK_RE = re.compile(r"(?<=\S)[ \t]{2,}(?=\r?$)", re.M)
 # text, otherwise the placeholder ends up glued to the next line and the
 # model cannot tell it is a separator.  It also keeps tokens free of `\r`,
 # so a CRLF source and an LF translation produce identical tokens.
-_BOX_RULE_RE = re.compile(
-    r"^[ \t]*(?:[\u2500-\u257f][ \t]*){3,}", re.M
-)
+_BOX_RULE_RE = re.compile(r"^[ \t]*(?:[\u2500-\u257f][ \t]*){3,}", re.M)
 # Thematic break: --- / *** / ___ / - - -   (line text only, no newline).
 _RULE_RE = re.compile(r"^ {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*", re.M)
 
@@ -119,14 +117,16 @@ _LINK_RE = re.compile(
     r"(?P<close>\]\((?:[^()\r\n]|\([^()\r\n]*\))*\))"
 )
 
-# A rule line at the very end of the text, with the whitespace that separated
-# it from the paragraph before and the whitespace that closes it.  A placeholder
-# alone on the last line is the one position a model reliably drops, so this is
-# remembered separately and put back in restore_markdown.
-_TRAILING_RULE_RE = re.compile(
+# A rule or a link/image that ends the text, with the whitespace that separated
+# it from the paragraph before and the whitespace that closes it.  A construct
+# that reduces to a placeholder pair on the last line, with nothing structural
+# after it, is the one position a model reliably drops — so this is remembered
+# separately and put back in restore_markdown.
+_TRAILING_RE = re.compile(
     r"((?:[ \t]*\r?\n)+)[ \t]*"
-    r"(?P<rule>-{3,}|\*{3,}|_{3,}|={2,}"
-    r"|[\u2500-\u257f](?:[ \t]*[\u2500-\u257f]){2,})"
+    r"(?P<item>-{3,}|\*{3,}|_{3,}|={2,}"
+    r"|[\u2500-\u257f](?:[ \t]*[\u2500-\u257f]){2,}"
+    r"|!?\[[^\[\]\r\n]*\]\([^()\r\n]*\))"
     r"(?P<tail>[ \t]*(?:\r?\n)?)\Z"
 )
 
@@ -152,11 +152,19 @@ def _mask_atx(match: re.Match, add: _Add, pos: int) -> str:
 
 
 def _mask_link(match: re.Match, add: _Add, pos: int) -> str:
-    """Mask the opening bracket and the whole `](destination)` part."""
+    """Mask the brackets of a link, or the whole of an image.
+
+    A link keeps its label visible so the text gets translated.  An image
+    becomes one token instead: the alt text is not rendered, and at the end of
+    a text a pair of placeholders with a word between them is the shape models
+    drop — and a half-dropped pair leaves the bare label behind as stray text.
+    """
+    if match.group("open") == "![":
+        return add("", match.group(0), "", True, pos)
     return (
         add("", match.group("open"), "", True, pos)
         + match.group("label")
-        + add("", match.group("close"), "", True)
+        + add("", match.group("close"), "", True, pos)
     )
 
 
@@ -188,10 +196,10 @@ class MaskedText:
     open: str
     close: str
     structural: list[bool] = field(default_factory=list)
-    # (token index, separator, rule, closing whitespace) for a rule line at the
-    # very end of the source; restored in restore_markdown if the model dropped
-    # it
-    trailing_rule: tuple[int, str, str, str] | None = None
+    # (token indices, separator, construct, closing whitespace) for a rule or a
+    # link/image at the very end of the source; restored in restore_markdown if
+    # the model dropped it.  A link contributes two tokens, a rule one.
+    trailing: tuple[tuple[int, ...], str, str, str] | None = None
 
     def placeholder(self, index: int) -> str:
         return f"{self.open}{index}{self.close}"
@@ -344,14 +352,22 @@ def mask_markdown(text: str, translate_fenced: bool = False) -> MaskedText:
         return _add(lead, block, trail)
 
     masked = full_re.sub(_repl, staged)
-    trailing = _TRAILING_RULE_RE.search(text)
-    trailing_index: int | None = None
-    if trailing is not None:
-        start, end = trailing.start("rule"), trailing.end("rule")
-        for i, pos in enumerate(positions):
-            if pos is not None and start <= pos <= end:
-                trailing_index = i
-                break
+    trailing: tuple[tuple[int, ...], str, str, str] | None = None
+    found = _TRAILING_RE.search(text)
+    if found is not None:
+        start, end = found.start("item"), found.end("item")
+        indices = tuple(
+            i
+            for i, pos in enumerate(positions)
+            if pos is not None and start <= pos <= end
+        )
+        if indices:
+            trailing = (
+                indices,
+                found.group(1),
+                found.group("item"),
+                found.group("tail"),
+            )
     return MaskedText(
         text=masked,
         tokens=tokens,
@@ -359,31 +375,34 @@ def mask_markdown(text: str, translate_fenced: bool = False) -> MaskedText:
         open=open_,
         close=close_,
         structural=structural,
-        trailing_rule=(
-            (
-                trailing_index,
-                trailing.group(1),
-                trailing.group("rule"),
-                trailing.group("tail"),
-            )
-            if trailing is not None and trailing_index is not None
-            else None
-        ),
+        trailing=trailing,
     )
 
 
 def restore_markdown(text: str, masked: MaskedText) -> str:
     """Put the original markers back and strip any leftover placeholders.
 
-    A rule line that ended the source is re-appended if the model dropped it —
-    a placeholder alone on the last line is the one spot it reliably loses, and
-    a missing separator at the end of a message is visible to the client.  The
-    whitespace around the rule is the source's own, folded to the line ending
-    the translation ended up with, so a blank line before the rule stays a
-    blank line and a setext underline stays an underline.
+    A rule or link/image that ended the source is re-appended if the model
+    dropped it — a construct that reduces to a bare placeholder on the last
+    line, with nothing after it, is the one spot it reliably loses, and a
+    missing separator or a missing image at the end of a message is visible to
+    the client.
+
+    The whitespace around it is the source's own bytes, not a guess from the
+    model's output: a blank line before a rule stays a blank line, a setext
+    underline stays an underline, and the result is identical to the source.
+    (translator.restore_line_endings then makes the whole message consistent
+    again, since the model normalises CRLF to LF on its own.)
+
+    Only a construct that vanished *entirely* is re-appended.  Half of one is
+    left alone: for a link the label between the two brackets would come back
+    twice, and a mangled construct is no better than a missing one — both are
+    reported by missing_placeholders, so nothing is hidden either way.
     """
-    trailing = masked.trailing_rule
-    dropped = trailing is not None and masked.placeholder(trailing[0]) not in text
+    trailing = masked.trailing
+    dropped = trailing is not None and all(
+        masked.placeholder(i) not in text for i in trailing[0]
+    )
     for index, token in enumerate(masked.tokens):
         replacement = masked.padded[index]
         if replacement in text:
@@ -392,13 +411,8 @@ def restore_markdown(text: str, masked: MaskedText) -> str:
             text = text.replace(masked.placeholder(index), token)
     text = re.sub(re.escape(masked.open) + r"\d*" + re.escape(masked.close), "", text)
     if dropped and trailing is not None:
-        _index, separator, rule, tail = trailing
-        eol = "\r\n" if "\r\n" in text else "\n"
-
-        def _fold(ws: str) -> str:
-            return ws.replace("\r\n", "\n").replace("\n", eol)
-
-        text = text.rstrip() + _fold(separator) + rule + _fold(tail)
+        _indices, separator, item, tail = trailing
+        text = text.rstrip() + separator + item + tail
     return text
 
 
