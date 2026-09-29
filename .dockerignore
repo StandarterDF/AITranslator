@@ -1,0 +1,23 @@
+# Secrets and local state must never enter the image: `COPY . .` would bake
+# the API keys and the personal config into it.
+.git
+.env
+config.json
+ISSUES.md
+logs/
+
+# Local runtimes
+venv/
+cache/
+stats/
+temporary/
+reasoning_state.json
+
+# Python and tool caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Desktop state
+.reasonix/

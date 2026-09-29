@@ -28,6 +28,45 @@ chmod +x install.sh start.sh
 
 Server starts at **http://0.0.0.0:5555**.
 
+### Docker
+
+```bash
+cp .env.example .env            # put your API keys in
+cp config.json.example config.json
+
+UID=$(id -u) GID=$(id -g) docker compose up -d
+docker compose logs -f
+```
+
+Both files have to exist first: `env_file` and the `config.json` bind mount
+fail the start otherwise, which is deliberate — a missing `config.json` would
+otherwise be created as a *directory* by Docker and the app would silently fall
+back to `config.json.example`.
+
+`UID`/`GID` make the container write `cache/` and `stats/` as you. Skip them
+and those files belong to `1000:1000`, after which a local
+`venv/bin/python main.py` on the same host can no longer write to them.
+
+| What | Where |
+|---|---|
+| cache, event log | bind-mounted to `./cache` and `./stats` — they survive `down` |
+| config | mounted read-only from `./config.json` |
+| API keys | `env_file: .env`, never copied into the image (see `.dockerignore`) |
+| logs | `docker compose logs`, rotated at 50 MB per cycle — no daily files |
+
+```bash
+docker compose ps          # STATUS should be healthy
+docker compose down        # stop; cache/ and stats/ stay on the host
+```
+
+There is no TUI in the container: `tui.py` starts a server of its own in the
+same process, so running it on the host would give you a second server on port
+5555 rather than a client. Talk to the container over HTTP — the web UI on
+`:5555` or `POST /translate`.
+
+Running without Docker is unaffected: `install.sh` / `start.sh` and
+`venv/bin/python main.py` work exactly as before.
+
 ## 💻 CLI (direct start)
 
 ```bash
@@ -274,6 +313,43 @@ chmod +x install.sh start.sh
 ```
 
 Сервер запускается на **http://0.0.0.0:5555**.
+
+### Docker
+
+```bash
+cp .env.example .env            # вписать ключи
+cp config.json.example config.json
+
+UID=$(id -u) GID=$(id -g) docker compose up -d
+docker compose logs -f
+```
+
+Оба файла должны существовать заранее: без них старт не пройдёт, и это намеренно
+— иначе Docker создал бы на месте отсутствующего `config.json` **каталог**, и
+приложение молча ушло бы в fallback на `config.json.example`.
+
+`UID`/`GID` заставляют контейнер писать в `cache/` и `stats/` от вашего
+пользователя. Без них эти файлы достанутся `1000:1000`, и локальный
+`venv/bin/python main.py` на том же хосте перестанет в них писать.
+
+| Что | Где лежит |
+|---|---|
+| кэш, журнал событий | примонтированы в `./cache` и `./stats` — переживают `down` |
+| конфиг | примонтирован только на чтение из `./config.json` |
+| ключи API | `env_file: .env`, в образ не попадают (см. `.dockerignore`) |
+| логи | `docker compose logs`, ротация 50 МБ за цикл — ежедневных файлов нет |
+
+```bash
+docker compose ps          # STATUS должен быть healthy
+docker compose down        # остановить; cache/ и stats/ остаются на хосте
+```
+
+TUI в контейнере нет: `tui.py` сам поднимает сервер в своём процессе, поэтому
+запущенный на хосте он даст второй сервер на порту 5555, а не клиент к
+контейнеру. Общайтесь по HTTP — веб-интерфейс на `:5555` или `POST /translate`.
+
+Запуск без Docker не меняется: `install.sh` / `start.sh` и
+`venv/bin/python main.py` работают как прежде.
 
 ## 💻 CLI (прямой запуск)
 

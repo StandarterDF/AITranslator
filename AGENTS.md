@@ -5,6 +5,7 @@
 - `python main.py` — starts FastAPI on `0.0.0.0:5555` (uvicorn `reload` is **off** by default)
 - `python main.py --reload` — starts FastAPI with uvicorn auto-reload enabled (development only)
 - `start.bat` — alias for `python main.py`
+- `docker compose up -d` — the same server in a container (`Dockerfile`, `docker-compose.yml`); `./cache` and `./stats` are bind mounts so runtime data survives `down`, `config.json` is mounted read-only, `.env` is injected via `env_file` and never baked into the image (`.dockerignore`). Start it as `UID=$(id -u) GID=$(id -g) docker compose up -d`, otherwise cache files become root-owned. No TUI in the container: `tui.py` runs its own server in-process.
 - Main route: `POST /translate` — expects `q` (text), `source` (default `"auto"`), `target` (required). Also `GET /health`, `GET /cache`, `DELETE /cache/{hash_key}`, `POST /cache/{hash_key}/invalidate`, `GET /stats`, `GET /stats/api`, `GET /` + `/static/*`.
 - Provider selection: `TRANSLATOR_PROVIDER` env var or `--provider <name>` → overrides `config.DEFAULT_PROVIDER`.
 - Config file: `--config <path>` CLI arg or `TRANSLATOR_CONFIG` env var

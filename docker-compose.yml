@@ -1,0 +1,38 @@
+services:
+  translator:
+    build: .
+    image: ailibretranslater:local
+    container_name: ailibretranslater
+    # Write cache/ and stats/ as yourself, otherwise the files end up owned by
+    # root and a local `venv/bin/python main.py` can no longer write to them.
+    # Start with: UID=$(id -u) GID=$(id -g) docker compose up -d
+    # Without those variables this falls back to 1000:1000, which is right on
+    # many servers and wrong on the rest.
+    user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "5555:5555"
+    env_file:
+      - .env
+    volumes:
+      # Read-only config. create_host_path:false makes compose fail loudly when
+      # the file is missing, instead of Docker quietly creating a directory
+      # there (which would drop the app into its config.json.example fallback).
+      - type: bind
+        source: ./config.json
+        target: /app/config.json
+        read_only: true
+        bind:
+          create_host_path: false
+      # The cache and the event log are runtime data. Without these volumes they
+      # live in the container layer: `docker restart` keeps them, but
+      # `docker compose down` and any recreate throw them away.
+      - ./cache:/app/cache
+      - ./stats:/app/stats
+    restart: unless-stopped
+    # Replaces the old daily log files: the default json-file driver has no
+    # limit, so cap it (50 MB per cycle).
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "5"

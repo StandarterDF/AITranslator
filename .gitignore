@@ -16,6 +16,7 @@ venv/
 cache/
 stats/events.jsonl
 reasoning_state.json
+logs/
 
 # User-local config (copy from config.json.example)
 config.json
