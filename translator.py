@@ -22,7 +22,12 @@ TRANSLATION_TIMEOUT = 30
 # suspect — a rewritten prompt, a different model, a new mask rule.  A bump
 # alone never re-translates: cached entries are only redone when the static
 # check in `_cached_defect` says they are wrong (see translate()).
-TRANSLATOR_VERSION = 1
+#
+#   1  versioning introduced; inline Markdown masking
+#   2  block-level markers masked (headings, rules, quotes, hard breaks, link
+#      brackets), a rule that ended the source is restored if the model drops
+#      it, and the translation keeps the source's line endings
+TRANSLATOR_VERSION = 2
 
 URL_PATTERN = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
 
