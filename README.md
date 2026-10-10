@@ -171,8 +171,8 @@ LIBRETRANSLATE_API_KEY=
 Ready-made minimal templates are in `configs/` (deepseek, localllm, deepseek+fallback). Copy the one you need to `config.json`.
 
 - `log_level` — root logger level: `DEBUG`, `INFO` (default), `WARNING`, `ERROR`. `DEBUG` enables verbose logs (full openai-client request bodies, httpcore connection details).
-- `preserve_markdown` (default `true`) — mask Markdown constructs with placeholders before sending to the model, restore them afterwards. Two passes: **block** (ATX heading markers, `---`/`***`/`___`/`===` rules, `───` box rules, `>` blockquotes, two-space hard breaks, `[text](url)` / `![alt](url)` brackets) and **inline** (emphasis, inline code, HTML tags/comments, URLs, fenced code). Heading text and link labels are still translated; only the markers are protected.
-- `translate_fenced_code` (default `true`) — translate the text inside ``` ``` blocks (only the fence delimiters are masked). `false` masks the whole block verbatim.
+- `preserve_markdown` (default `true`) — mask Markdown constructs with placeholders before sending to the model, restore them afterwards. Two passes: **block** (ATX heading markers, `---`/`***`/`___`/`===` rules, `───` box rules, `>` blockquotes, two-space hard breaks, `[text](url)` / `![alt](url)` brackets) and **inline** (emphasis, inline code, HTML tags/comments, URLs, fenced code). Heading text, link labels, fenced-block content and the text inside inline code are still translated; only the markers (including the backticks of inline code) are protected.
+- `translate_fenced_code` (default `true`) — translate the text inside ``` ``` blocks (only the fence delimiters are masked). `false` masks the whole block verbatim. Inline code `` `x` `` follows the same rule regardless of this option: only the backticks are masked.
 
 ### Reasoning effort
 

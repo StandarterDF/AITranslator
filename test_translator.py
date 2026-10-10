@@ -347,11 +347,12 @@ class TestMarkdownGuardFenced:
         assert "Hello world" not in masked.text
         assert len(masked.tokens) == 1
 
-    def test_inline_code_inside_fence_still_masked(self):
+    def test_inline_code_inside_fence_content_visible(self):
         text = "```\n`inline` and *em*\n```"
         masked = markdown_guard.mask_markdown(text, translate_fenced=True)
-        assert "`inline`" not in masked.text
-        assert "*em*" not in masked.text
+        assert "`" not in masked.text  # backticks masked
+        assert "inline" in masked.text  # but the code text is translatable
+        assert "*em*" not in masked.text  # emphasis markers still masked
 
     def test_missing_placeholders_detected(self):
         masked = markdown_guard.mask_markdown(
@@ -372,6 +373,71 @@ class TestMarkdownGuardFenced:
         masked = markdown_guard.mask_markdown("```\ncontent\n```")
         instr = markdown_guard.markdown_instruction(masked)
         assert "блоки кода" not in instr
+
+
+class TestMarkdownGuardInlineCode:
+    """Inline code keeps only its backticks masked, so the text between them is
+    translated like prose instead of being preserved verbatim."""
+
+    CASES = [
+        "Use `Hello` here",
+        "`Hello`",
+        "a`Hello`b",
+        "Text `one` and `two` end",
+        "see `https://e.com`",
+    ]
+
+    def test_content_visible_but_backticks_masked(self):
+        masked = markdown_guard.mask_markdown("Use `Hello` here")
+        assert "`" not in masked.text
+        assert "Hello" in masked.text
+        assert masked.tokens == ["`", "`"]
+
+    def test_no_space_injected_between_backtick_and_content(self):
+        masked = markdown_guard.mask_markdown("a`Hello`b")
+        assert masked.text == (
+            f"a {masked.placeholder(0)}Hello{masked.placeholder(1)} b"
+        )
+
+    def test_roundtrip_is_exact(self):
+        for text in self.CASES:
+            masked = markdown_guard.mask_markdown(text)
+            assert markdown_guard.restore_markdown(masked.text, masked) == text
+
+    def test_backticks_are_not_structural(self):
+        masked = markdown_guard.mask_markdown("Use `Hello` here")
+        assert masked.is_structural(0) is False
+        assert masked.is_structural(1) is False
+
+    def test_has_markdown_detects_inline_code(self):
+        assert markdown_guard.has_markdown("`code`")
+
+    def test_inline_code_in_fenced_block_translatable(self):
+        text = "```\n`Hello` world\n```"
+        masked = markdown_guard.mask_markdown(text, translate_fenced=True)
+        assert "Hello" in masked.text
+        assert "`" not in masked.text
+
+    def test_has_inline_code(self):
+        assert markdown_guard.has_inline_code("Use `Hello` here")
+        assert markdown_guard.has_inline_code("`x`")
+        assert not markdown_guard.has_inline_code("```\nno inline\n```")
+        assert not markdown_guard.has_inline_code("plain text")
+
+    def test_has_inline_code_inside_fence_depends_on_translate_fenced(self):
+        text = "```\n`Hello` world\n```"
+        assert markdown_guard.has_inline_code(text, translate_fenced=True)
+        assert not markdown_guard.has_inline_code(text, translate_fenced=False)
+
+    def test_instruction_tells_to_translate_inline_code_text(self):
+        masked = markdown_guard.mask_markdown("Use `Hello` here")
+        instr = markdown_guard.markdown_instruction(masked)
+        assert "вставка" in instr
+
+    def test_instruction_has_no_inline_code_note_without_it(self):
+        masked = markdown_guard.mask_markdown("plain *em* text")
+        instr = markdown_guard.markdown_instruction(masked)
+        assert "вставка" not in instr
 
 
 class TestMarkdownGuardBlocks:
@@ -492,7 +558,7 @@ class TestMarkdownGuardBlocks:
             for i in range(len(masked.tokens))
             if not masked.is_structural(i)
         ]
-        assert inline_tokens == ["*", "*", "`c`"]
+        assert inline_tokens == ["*", "*", "`", "`"]
 
     def test_is_structural_out_of_range(self):
         masked = markdown_guard.mask_markdown("## H\n")
@@ -1059,6 +1125,75 @@ class TestCacheVersioning:
             self._translate(env)
             self._translate(env)
         assert env.stale == 1
+
+
+class TestInlineCodeCacheRefresh:
+    """Before v3 the text of inline code was kept verbatim, and the mask check
+    cannot see the difference — the backticks survive either way.  translate()
+    must therefore treat an older entry with inline code as stale instead of
+    adopting it."""
+
+    SOURCE = "Use `Hello` here\n"
+    # v2 output: the code text was never sent to the model, so it is intact
+    OLD = "Используй `Hello` здесь"
+    # v3 output: the code text was translated along with the prose
+    GOOD = "Используй `Привет` здесь"
+    REPLY = GOOD + "\n"
+
+    @pytest.fixture
+    def env(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(cache_manager, "CACHE_DIR", tmp_path / "cache")
+        monkeypatch.setattr(stats_manager, "STATS_DIR", tmp_path / "stats")
+        monkeypatch.setattr(
+            stats_manager, "EVENTS_FILE", tmp_path / "stats" / "events.jsonl"
+        )
+        tr = translator.LLMTranslator()
+        tr.chain = [{"type": "llm", "provider": tr.default_provider}]
+        return tr
+
+    def _write(self, translated, version):
+        key = cache_manager.cache_key("auto", "ru", self.SOURCE)
+        data = {
+            "hash": key,
+            "source": "auto",
+            "target": "ru",
+            "source_text": self.SOURCE,
+            "translated_text": translated,
+            "created_at": 1000.0,
+            "invalid": False,
+            "version": version,
+        }
+        cache_manager.CACHE_DIR.mkdir(parents=True, exist_ok=True)
+        (cache_manager.CACHE_DIR / f"{key}.json").write_text(
+            json.dumps(data, ensure_ascii=False), "utf-8"
+        )
+        return key
+
+    def _translate(self, env):
+        return asyncio.run(env.translate(self.SOURCE, "auto", "ru"))
+
+    def test_entry_with_inline_code_from_an_older_version_is_redone(self, env):
+        key = self._write(self.OLD, version=2)
+        with patch.object(
+            translator.LLMTranslator,
+            "_translate_via_llm",
+            new=AsyncMock(return_value=self.GOOD),
+        ) as llm:
+            result = self._translate(env)
+        llm.assert_called_once()
+        assert result["translatedText"] == self.REPLY
+        assert env.stale == 1
+        assert env.cached == 0
+        entry = json.loads((cache_manager.CACHE_DIR / f"{key}.json").read_text("utf-8"))
+        assert entry["version"] == translator.TRANSLATOR_VERSION
+
+    def test_current_entry_with_inline_code_is_reused(self, env):
+        self._write(self.GOOD, version=translator.TRANSLATOR_VERSION)
+        with patch.object(translator.LLMTranslator, "_translate_via_llm") as llm:
+            result = self._translate(env)
+        llm.assert_not_called()
+        assert result["translatedText"] == self.REPLY
+        assert env.cached == 1
 
 
 class TestCacheManagerVersion:

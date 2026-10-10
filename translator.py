@@ -27,7 +27,9 @@ TRANSLATION_TIMEOUT = 30
 #   2  block-level markers masked (headings, rules, quotes, hard breaks, link
 #      brackets), a rule that ended the source is restored if the model drops
 #      it, and the translation keeps the source's line endings
-TRANSLATOR_VERSION = 2
+#   3  inline code (`` `x` ``) keeps only its backticks masked, so the text
+#      between them is translated instead of being preserved verbatim
+TRANSLATOR_VERSION = 3
 
 URL_PATTERN = re.compile(r"https?://[A-Za-z0-9\-._~:/?#\[\]@!$&'()*+,;=%]+")
 
@@ -416,6 +418,23 @@ class LLMTranslator:
         if entry is not None:
             defect = cached_defect(text, cached, target_lang)
             stored = cache_manager.get_version(entry)
+            if (
+                defect is None
+                and config.PRESERVE_MARKDOWN
+                and stored < TRANSLATOR_VERSION
+                and markdown_guard.has_inline_code(
+                    text, translate_fenced=config.TRANSLATE_FENCED_CODE
+                )
+            ):
+                # Since v3 the text of inline code is translated, so an entry
+                # written by an older pipeline kept it verbatim.  The mask token
+                # multisets still match (the backticks survive either way), so
+                # cached_defect cannot see it — this is the one change the
+                # static check is blind to, and the entry must be redone.
+                defect = (
+                    f"inline code is translated since v{TRANSLATOR_VERSION} "
+                    f"(entry was made by v{stored})"
+                )
 
             if defect is None:
                 # Still good.  Adopt the current version if the entry predates

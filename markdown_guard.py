@@ -20,8 +20,9 @@ Two passes run over the text:
 Fenced code blocks are skipped by the block pass and handled by the inline
 pass: the whole block is masked by default; with ``translate_fenced=True`` only
 the fence delimiters are masked, so the text inside a block stays visible to
-the translator and is translated.  Inline code (`` `x` ``) is always masked
-whole.
+the translator and is translated.  Inline code (`` `x` ``) is handled the same
+way: only the backticks become placeholders, the text between them stays
+visible and is translated.
 
 Tokens from the block pass are marked *structural* — losing one of those means
 the translation lost document structure, not just formatting.
@@ -41,7 +42,7 @@ _MASK_PROBE_INNER = (
     r"<!--.*?-->"  # HTML comment
     r"|<[a-zA-Z/!][^>]*>"  # HTML tag
     r"|https?://[^\s<>\"'\)\]]+"  # URL
-    r"|`[^`\n]+`"  # inline code
+    r"|`[^`\n]+`"  # inline code (backticks masked, content translated)
     r"|\*+"  # emphasis / action runs ( *, **, ... )
 )
 
@@ -65,7 +66,7 @@ def _build_inline_regexes(open_: str) -> tuple[re.Pattern, re.Pattern]:
         r"<!--.*?-->"  # HTML comment
         r"|<[a-zA-Z/!][^>]*>"  # HTML tag
         rf"|https?://(?:{not_placeholder}[^\s<>\"'\)\]])+"  # URL
-        r"|`[^`\n]+`"  # inline code
+        r"|`[^`\n]+`"  # inline code (backticks masked, content translated)
         r"|\*+"  # emphasis / action runs ( *, **, ... )
     )
     full = r"```.*?```" + "|" + inner
@@ -235,6 +236,19 @@ def has_markdown(text: str) -> bool:
     )
 
 
+def has_inline_code(text: str, translate_fenced: bool = True) -> bool:
+    """True if ``text`` has inline code whose content this pipeline translates.
+
+    An inline-code span emits two single-backtick tokens; a fenced block emits
+    a token starting with three backticks.  A lone backtick token therefore
+    means inline code was found.  Inline code inside a fenced block only reaches
+    the inline pass when that block's content is translated, hence the
+    ``translate_fenced`` flag.
+    """
+    masked = mask_markdown(text, translate_fenced=translate_fenced)
+    return "`" in masked.tokens
+
+
 def without_fenced_blocks(text: str) -> str:
     """Strip fenced code blocks (```...```) from a text.
 
@@ -277,8 +291,9 @@ def mask_markdown(text: str, translate_fenced: bool = False) -> MaskedText:
 
     With translate_fenced=True the delimiters of fenced code blocks (```)
     become placeholders while the text between them stays visible, so the
-    translator still sees and translates it.  Inline code (`` `x` ``) is always
-    masked whole — identifiers are never translated.
+    translator still sees and translates it.  Inline code (`` `x` ``) is
+    handled the same way: only the backticks are masked, so the text between
+    them stays visible and is translated as part of the surrounding prose.
     """
     open_, close_ = _pick_format(text)
     inner_re, full_re = _build_inline_regexes(open_)
@@ -328,10 +343,24 @@ def mask_markdown(text: str, translate_fenced: bool = False) -> MaskedText:
         trail = " " if match.end() < len(s) and not s[match.end()].isspace() else ""
         return lead, trail
 
+    def _mask_inline(body: str, lead: str, trail: str) -> str:
+        if (
+            len(body) >= 2
+            and body.startswith("`")
+            and not body.startswith("```")
+            and body.endswith("`")
+        ):
+            # Inline code: mask only the backticks, leave the text between them
+            # visible so the model translates it like prose.  The spacer goes on
+            # the outside of the pair, never between a backtick and its content.
+            return _add(lead, body[0], "") + body[1:-1] + _add("", body[-1], trail)
+        return _add(lead, body, trail)
+
     def _mask_plain(s: str) -> str:
         def _repl(match: re.Match) -> str:
+            body = match.group(0)
             lead, trail = _spacing(match, s)
-            return _add(lead, match.group(0), trail)
+            return _mask_inline(body, lead, trail)
 
         return inner_re.sub(_repl, s)
 
@@ -349,7 +378,7 @@ def mask_markdown(text: str, translate_fenced: bool = False) -> MaskedText:
                     inner = ""
                 close_str = _add("", close_line, trail)
                 return f"{open_str}\n{inner}{close_str}"
-        return _add(lead, block, trail)
+        return _mask_inline(block, lead, trail)
 
     masked = full_re.sub(_repl, staged)
     trailing: tuple[tuple[int, ...], str, str, str] | None = None
@@ -449,5 +478,11 @@ def markdown_instruction(masked: MaskedText, translate_fenced: bool = False) -> 
             f"\n\nМаркеры на отдельных строках ограничивают блоки кода. "
             f"Весь текст между ними — обычный текст: переводи его наравне "
             f"со всем остальным, а сами маркеры сохрани нетронутыми."
+        )
+    if any(t == "`" for t in masked.tokens):
+        base += (
+            f"\n\nПара маркеров вокруг одного слова или фразы — это вставка "
+            f"кода: текст между этими двумя маркерами переводи как обычный "
+            f"текст, а сами маркеры оставь нетронутыми."
         )
     return base
