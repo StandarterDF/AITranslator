@@ -202,7 +202,22 @@ if os.path.isdir(static_dir):
         return FileResponse(os.path.join(static_dir, "index.html"))
 
 
+# Uvicorn drops an idle keep-alive connection after 5 s by default, and Node 19+
+# (SillyTavern) keeps sockets in a pool for about the same time. The two timers
+# race: SillyTavern reuses a socket the server has just closed, the request dies
+# with ECONNRESET and is reported as "request to .../translate failed, reason:
+# socket hang up". That request never reaches the app, which is why /stats shows
+# no error for it while the browser UI (fresh connection per request) works.
+# 75 s is nginx's default: the socket stays open well past any client reuse.
+KEEP_ALIVE_SECONDS = 75
+
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=5555, reload=_reload)
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=5555,
+        reload=_reload,
+        timeout_keep_alive=KEEP_ALIVE_SECONDS,
+    )

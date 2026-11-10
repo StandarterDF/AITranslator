@@ -118,6 +118,9 @@ class ServerProcess:
             log_level="info",
             reload=False,
             lifespan="on",
+            # Same value as the plain-python launch; see main.py for why a 5 s
+            # default breaks SillyTavern's pooled sockets.
+            timeout_keep_alive=main_module.KEEP_ALIVE_SECONDS,
         )
         self._server = uvicorn.Server(uvicorn_cfg)
 
